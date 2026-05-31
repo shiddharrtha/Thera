@@ -10,6 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { HealthBar } from '../components/HealthBar';
 import type { ScreenProps } from '../types/navigation';
 import { colors } from '../theme/colors';
+import { createStyles } from '../theme/createStyles';
 
 const FIELDS = [
   {
@@ -133,7 +134,7 @@ export function HomeScreen({ onNavigate }: ScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
     backgroundColor: colors.white,

@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
+import { createStyles } from '../theme/createStyles';
 
 interface HealthBarProps {
   pct: number;
@@ -17,7 +18,7 @@ export function HealthBar({ pct, color }: HealthBarProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   container: {
     flexDirection: 'row',
     alignItems: 'center',

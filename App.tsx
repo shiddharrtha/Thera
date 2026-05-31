@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { View, StyleSheet } from 'react-native';
+import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { Screen, NavTab } from './src/types/navigation';
@@ -39,6 +40,9 @@ const TAB_SCREEN_MAP: Record<NavTab, Screen> = {
 };
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    'Gilroy-ExtraBold': require('./assets/fonts/Gilroy-ExtraBold.ttf'),
+  });
   const [screen, setScreen] = useState<Screen>('splash');
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [history, setHistory] = useState<Screen[]>([]);
@@ -98,6 +102,10 @@ export default function App() {
   const statusBarStyle = screen === 'splash' || screen === 'scan' ? 'light' : 'dark';
   const backgroundColor =
     screen === 'splash' ? 'transparent' : screen === 'scan' ? colors.scanDark : colors.background;
+
+  if (!fontsLoaded) {
+    return <View style={[styles.container, { backgroundColor: colors.background }]} />;
+  }
 
   return (
     <SafeAreaProvider>

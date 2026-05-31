@@ -4,6 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Polygon, Polyline, Circle, Text as SvgText } from 'react-native-svg';
 import type { ScreenProps } from '../types/navigation';
 import { colors } from '../theme/colors';
+import { createStyles } from '../theme/createStyles';
+import { fonts } from '../theme/typography';
 
 const ALL_LAYERS = ['Weeds', 'Stress', 'Spray Zones', 'Scan Path'] as const;
 type Layer = (typeof ALL_LAYERS)[number];
@@ -60,21 +62,21 @@ export function FieldMapScreen({ onNavigate, onBack }: ScreenProps) {
             />
           )}
           <Circle cx="103" cy="148" r="22" fill="rgba(239,68,68,0.18)" stroke="#EF4444" strokeWidth="2" />
-          <SvgText x="103" y="143" fontSize="9" fill="#EF4444" fontWeight="800" textAnchor="middle">
+          <SvgText x="103" y="143" fontSize="9" fill="#EF4444" fontWeight="800" fontFamily={fonts.extraBold} textAnchor="middle">
             Zone A
           </SvgText>
-          <SvgText x="103" y="155" fontSize="7.5" fill="#EF4444" textAnchor="middle">
+          <SvgText x="103" y="155" fontSize="7.5" fill="#EF4444" fontFamily={fonts.extraBold} textAnchor="middle">
             HIGH
           </SvgText>
           {has('Stress') && (
             <>
               <Circle cx="262" cy="170" r="18" fill="rgba(245,158,11,0.18)" stroke="#F59E0B" strokeWidth="2" />
-              <SvgText x="262" y="165" fontSize="8.5" fill="#F59E0B" fontWeight="800" textAnchor="middle">
+              <SvgText x="262" y="165" fontSize="8.5" fill="#F59E0B" fontWeight="800" fontFamily={fonts.extraBold} textAnchor="middle">
                 Zone B
               </SvgText>
             </>
           )}
-          <SvgText x="190" y="370" fontSize="10" fill="#166534" fontWeight="700" textAnchor="middle" opacity="0.8">
+          <SvgText x="190" y="370" fontSize="10" fill="#166534" fontWeight="700" fontFamily={fonts.extraBold} textAnchor="middle" opacity="0.8">
             ✓ Healthy
           </SvgText>
         </Svg>
@@ -149,7 +151,7 @@ export function FieldMapScreen({ onNavigate, onBack }: ScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   container: { flex: 1, backgroundColor: '#D1D5DB' },
   mapBg: { ...StyleSheet.absoluteFill, backgroundColor: '#E5E7EB' },
   header: {

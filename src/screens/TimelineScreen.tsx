@@ -3,6 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 import type { ScreenProps } from '../types/navigation';
 import { colors } from '../theme/colors';
+import { createStyles } from '../theme/createStyles';
 
 const TIMELINE_EVENTS = [
   { date: 'May 25', label: 'Weed pressure increased to 18%', type: 'warning' },
@@ -138,7 +139,7 @@ export function TimelineScreen({ onBack }: ScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
     backgroundColor: colors.white,

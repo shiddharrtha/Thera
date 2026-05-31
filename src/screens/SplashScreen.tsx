@@ -12,6 +12,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Screen } from '../types/navigation';
 import { colors } from '../theme/colors';
+import { createStyles } from '../theme/createStyles';
 
 /** Bundled farmer & field photos — Ken Burns cross-fade slideshow */
 const SLIDES = [
@@ -154,7 +155,7 @@ export function SplashScreen({ onNavigate }: SplashScreenProps) {
       <View style={styles.content}>
         <Image
           source={require('../../assets/thera-logo.png')}
-          style={styles.logo}
+          style={logoStyle.logo}
           resizeMode="contain"
           accessibilityLabel="Thera logo"
         />
@@ -175,7 +176,16 @@ export function SplashScreen({ onNavigate }: SplashScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const logoStyle = StyleSheet.create({
+  logo: {
+    width: 110,
+    height: 110,
+    borderRadius: 24,
+    marginBottom: 16,
+  },
+});
+
+const styles = createStyles({
   container: {
     flex: 1,
     alignSelf: 'stretch',
@@ -202,12 +212,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 32,
     zIndex: 2,
-  },
-  logo: {
-    width: 110,
-    height: 110,
-    borderRadius: 24,
-    marginBottom: 16,
   },
   title: {
     fontSize: 48,

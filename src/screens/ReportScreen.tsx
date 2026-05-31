@@ -4,6 +4,8 @@ import Svg, { Rect, Polygon, Polyline, Text as SvgText } from 'react-native-svg'
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
 import { colors } from '../theme/colors';
+import { createStyles } from '../theme/createStyles';
+import { fonts } from '../theme/typography';
 
 function FieldZoneMap() {
   return (
@@ -22,16 +24,16 @@ function FieldZoneMap() {
         opacity="0.65"
       />
       <Rect x="22" y="26" width="70" height="28" rx="4" fill="rgba(239,68,68,0.85)" />
-      <SvgText x="57" y="36" fontSize="7" fill="white" fontWeight="800" textAnchor="middle">
+      <SvgText x="57" y="36" fontSize="7" fill="white" fontWeight="800" fontFamily={fonts.extraBold} textAnchor="middle">
         HIGH
       </SvgText>
-      <SvgText x="57" y="47" fontSize="6.5" fill="white" textAnchor="middle">
+      <SvgText x="57" y="47" fontSize="6.5" fill="white" fontFamily={fonts.extraBold} textAnchor="middle">
         Weed Zone
       </SvgText>
-      <SvgText x="210" y="45" fontSize="7" fill="#92400E" fontWeight="700" textAnchor="middle">
+      <SvgText x="210" y="45" fontSize="7" fill="#92400E" fontWeight="700" fontFamily={fonts.extraBold} textAnchor="middle">
         Stress
       </SvgText>
-      <SvgText x="140" y="135" fontSize="7" fill="#166534" fontWeight="700" textAnchor="middle">
+      <SvgText x="140" y="135" fontSize="7" fill="#166534" fontWeight="700" fontFamily={fonts.extraBold} textAnchor="middle">
         Healthy
       </SvgText>
     </Svg>
@@ -163,7 +165,7 @@ export function ReportScreen({ onNavigate, onBack }: ScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
     backgroundColor: colors.white,

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
 import { colors } from '../theme/colors';
+import { createStyles } from '../theme/createStyles';
 
 const STEPS = [
   'Uploading video',
@@ -118,7 +119,7 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   container: { flex: 1, backgroundColor: colors.white, padding: 20 },
   header: { alignItems: 'center', marginBottom: 24 },
   iconBox: {

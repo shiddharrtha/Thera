@@ -1,75 +1,85 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
+import { createStyles } from '../theme/createStyles';
 
 interface FloatingInputProps {
   label: string;
   value: string;
   onChange: (v: string) => void;
   secureTextEntry?: boolean;
+  placeholder?: string;
   right?: React.ReactNode;
 }
 
-export function FloatingInput({ label, value, onChange, secureTextEntry, right }: FloatingInputProps) {
+export function FloatingInput({
+  label,
+  value,
+  onChange,
+  secureTextEntry,
+  placeholder,
+  right,
+}: FloatingInputProps) {
   const [focused, setFocused] = useState(false);
-  const active = focused || value.length > 0;
 
   return (
     <View style={styles.container}>
-      <Text style={[styles.label, active && styles.labelActive]}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChange}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        secureTextEntry={secureTextEntry}
-        style={[styles.input, focused && styles.inputFocused, right ? styles.inputWithRight : undefined]}
-      />
-      {right && <View style={styles.right}>{right}</View>}
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.inputWrap}>
+        <TextInput
+          value={value}
+          onChangeText={onChange}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          secureTextEntry={secureTextEntry}
+          placeholder={placeholder}
+          placeholderTextColor={colors.gray400}
+          style={[
+            styles.input,
+            focused && styles.inputFocused,
+            right ? styles.inputWithRight : undefined,
+          ]}
+        />
+        {right && <View style={styles.right}>{right}</View>}
+      </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   container: {
-    marginBottom: 16,
-    position: 'relative',
+    marginBottom: 14,
   },
   label: {
-    position: 'absolute',
-    left: 12,
-    top: 16,
-    fontSize: 14,
-    color: colors.gray400,
-    zIndex: 1,
-  },
-  labelActive: {
-    top: 6,
-    fontSize: 10,
-    color: colors.primary,
+    fontSize: 12,
     fontWeight: '600',
+    color: colors.gray900,
+    marginBottom: 6,
+  },
+  inputWrap: {
+    position: 'relative',
   },
   input: {
-    paddingTop: 22,
-    paddingBottom: 8,
+    paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: '#D1D5DB',
-    backgroundColor: '#FAFAFA',
-    fontSize: 14,
+    borderColor: colors.gray200,
+    backgroundColor: colors.white,
+    fontSize: 13,
     color: colors.gray900,
   },
   inputFocused: {
     borderColor: colors.primary,
   },
   inputWithRight: {
-    paddingRight: 40,
+    paddingRight: 48,
   },
   right: {
     position: 'absolute',
-    right: 12,
-    top: '50%',
-    transform: [{ translateY: -8 }],
+    right: 14,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
   },
 });

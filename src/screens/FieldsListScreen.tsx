@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { HealthRing } from '../components/HealthRing';
 import type { ScreenProps } from '../types/navigation';
 import { colors } from '../theme/colors';
+import { createStyles } from '../theme/createStyles';
 
 const FIELDS = [
   { id: 1, name: 'North 40', crop: 'Soybean', acres: 40, lastScan: 'May 25, 2026', health: 82, issues: 2, savings: '$340', status: 'warning' as const },
@@ -139,7 +140,7 @@ export function FieldsListScreen({ onNavigate, onBack }: ScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
     backgroundColor: colors.white,

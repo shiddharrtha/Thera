@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
+import { createStyles } from '../theme/createStyles';
 
 interface HealthRingProps {
   score: number;
@@ -34,7 +35,7 @@ export function HealthRing({ score, size = 50 }: HealthRingProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   center: {
     ...StyleSheet.absoluteFill,
     alignItems: 'center',

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
 import { colors } from '../theme/colors';
+import { createStyles } from '../theme/createStyles';
 
 export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
   const [recording, setRecording] = useState(false);
@@ -171,7 +172,7 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   container: { flex: 1, backgroundColor: colors.scanDark },
   rowLine: {
     position: 'absolute',

@@ -2,6 +2,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import type { NavTab } from '../types/navigation';
+import { createStyles } from '../theme/createStyles';
 
 const LEFT_TABS: { id: NavTab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { id: 'home', label: 'Home', icon: 'home' },
@@ -43,7 +44,7 @@ export function BottomNav({ active, onTab }: BottomNavProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createStyles({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
