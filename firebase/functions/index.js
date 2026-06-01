@@ -29,16 +29,16 @@ async function createSupabaseProfile(user) {
       'Content-Type': 'application/json',
       apikey: serviceRoleKey,
       Authorization: `Bearer ${serviceRoleKey}`,
-      Prefer: 'return=minimal',
+      Prefer: 'resolution=merge-duplicates,return=minimal',
     },
     body: JSON.stringify({
       id: user.uid,
       email: user.email ?? '',
-      full_name: user.displayName ?? null,
+      full_name: user.displayName?.trim() || null,
     }),
   });
 
-  if (response.ok || response.status === 409) {
+  if (response.ok) {
     return;
   }
 
@@ -46,8 +46,16 @@ async function createSupabaseProfile(user) {
   console.error('Supabase profile insert failed', response.status, body);
 }
 
-/** Adds Supabase-required role claim and profile row when a Firebase user is created. */
+/**
+ * Sets Supabase auth claim on signup. Profile row (with name) is written from the app
+ * after displayName is set — onCreate runs before the client can update the profile.
+ */
 exports.processSignUp = functions.auth.user().onCreate(async (user) => {
   await getAuth().setCustomUserClaims(user.uid, AUTHENTICATED_CLAIM);
+  // Optional early row (email only); client upsert fills full_name after registration.
   await createSupabaseProfile(user);
 });
+
+const passwordReset = require('./passwordReset');
+exports.requestPasswordResetOtp = passwordReset.requestPasswordResetOtp;
+exports.confirmPasswordResetOtp = passwordReset.confirmPasswordResetOtp;

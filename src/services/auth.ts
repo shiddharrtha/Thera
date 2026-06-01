@@ -1,5 +1,9 @@
 import type { FirebaseAuthTypes } from '@react-native-firebase/auth';
-import { firebaseAuth } from '../lib/firebase';
+import {
+  callConfirmPasswordResetOtp,
+  callRequestPasswordResetOtp,
+} from '../lib/functions';
+import { ensureFirebaseInitialized, firebaseAuth } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
 
 export type AuthUser = FirebaseAuthTypes.User;
@@ -70,19 +74,59 @@ async function upsertProfileWithRetry(userId: string, email: string, fullName: s
 }
 
 /** Create or update the Supabase profile for the current Firebase user. */
-export async function ensureProfile(user: AuthUser) {
+export async function ensureProfile(user: AuthUser, options?: { fullName?: string }) {
   const email = user.email;
   if (!email) return;
 
   await refreshFirebaseToken(true);
 
-  const { data } = await supabase.from('profiles').select('id').eq('id', user.uid).maybeSingle();
-  if (data) return;
+  const fullName = options?.fullName?.trim() ?? user.displayName?.trim() ?? '';
 
-  await upsertProfileWithRetry(user.uid, email, user.displayName ?? '');
+  const { data } = await supabase
+    .from('profiles')
+    .select('id, full_name')
+    .eq('id', user.uid)
+    .maybeSingle();
+
+  const needsRow = !data;
+  const needsName = Boolean(fullName && data?.full_name !== fullName);
+
+  if (!needsRow && !needsName) return;
+
+  await upsertProfileWithRetry(user.uid, email, fullName);
+}
+
+const FUNCTIONS_ERROR_MESSAGES: Record<string, string> = {
+  'functions/internal': 'Something went wrong. Please try again in a moment.',
+  'functions/failed-precondition':
+    'We could not send the verification email. Please try again later or contact support.',
+  'functions/resource-exhausted': 'Too many attempts. Please wait and try again.',
+  'functions/invalid-argument': 'Please check your details and try again.',
+  'functions/unavailable': 'Service is temporarily unavailable. Please try again.',
+};
+
+function getCallableErrorMessage(error: unknown): string | null {
+  const code = (error as { code?: string })?.code;
+  const message = (error as { message?: string })?.message;
+
+  if (!code?.startsWith('functions/')) {
+    return null;
+  }
+
+  const statusToken = code.replace('functions/', '').toUpperCase();
+  const isGenericStatusOnly = !message || message === statusToken || message === 'INTERNAL';
+
+  if (isGenericStatusOnly) {
+    return FUNCTIONS_ERROR_MESSAGES[code] ?? FUNCTIONS_ERROR_MESSAGES['functions/internal'];
+  }
+
+  return message;
 }
 
 export function getAuthErrorMessage(error: unknown): string {
+  const callableMessage = getCallableErrorMessage(error);
+  if (callableMessage) return callableMessage;
+
   const code = (error as { code?: string })?.code;
 
   switch (code) {
@@ -96,6 +140,10 @@ export function getAuthErrorMessage(error: unknown): string {
       return 'An account with this email already exists.';
     case 'auth/weak-password':
       return 'Password must be at least 6 characters.';
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Please wait a few minutes and try again.';
+    case 'auth/missing-email':
+      return 'Please enter your email address.';
     case '42501':
       return 'Profile save blocked by database permissions. Run supabase/fix-firebase-rls.sql in Supabase.';
     case 'PGRST301':
@@ -115,9 +163,10 @@ export async function signUp(email: string, password: string, fullName: string) 
   try {
     if (trimmedName) {
       await user.updateProfile({ displayName: trimmedName });
+      await user.reload();
     }
 
-    await upsertProfileWithRetry(user.uid, user.email ?? trimmedEmail, trimmedName);
+    await ensureProfile(user, { fullName: trimmedName });
   } catch (error) {
     try {
       await user.delete();
@@ -135,6 +184,14 @@ export async function signIn(email: string, password: string) {
   await refreshFirebaseToken(true);
   await ensureProfile(user);
   return user;
+}
+
+export async function requestPasswordResetOtp(email: string) {
+  return callRequestPasswordResetOtp(email);
+}
+
+export async function resetPasswordWithOtp(email: string, code: string, newPassword: string) {
+  await callConfirmPasswordResetOtp(email, code, newPassword);
 }
 
 export async function signOut() {

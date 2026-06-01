@@ -16,6 +16,7 @@
     "expo-linear-gradient": "~56.0.4",
     "expo-status-bar": "~56.0.4",
     "expo-video": "~56.1.2",
+    "firebase": "^12.14.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.85.3",
@@ -33,7 +34,11 @@
     "ios": "node scripts/ensure-xcode.mjs && expo run:ios --device \"iPhone 17 Pro\"",
     "ios:setup": "node scripts/ensure-xcode.mjs && cd ios && pod install --repo-update",
     "prebuild": "expo prebuild --clean",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "email:setup": "node scripts/setup-resend-email.mjs"
   },
-  "private": true
+  "private": true,
+  "engines": {
+    "node": ">=20.19.4"
+  }
 }

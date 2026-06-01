@@ -2,6 +2,7 @@ export type Screen =
   | 'splash'
   | 'login'
   | 'signup'
+  | 'forgot-password'
   | 'home'
   | 'scan'
   | 'processing'

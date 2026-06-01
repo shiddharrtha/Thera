@@ -116,11 +116,6 @@ export function SignUpScreen({ onNavigate }: SignUpScreenProps) {
           }
         />
 
-        <Text style={styles.terms}>
-          By Clicking Register, I agree with{' '}
-          <Text style={styles.termsLink}>Terms & Conditions</Text>
-        </Text>
-
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <TouchableOpacity
@@ -185,15 +180,6 @@ const styles = createStyles({
     textAlign: 'center',
   },
   titleAccent: { color: colors.primary },
-  terms: {
-    fontSize: 11,
-    color: colors.gray500,
-    lineHeight: 16,
-    marginTop: -4,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  termsLink: { fontWeight: '600', color: colors.primary },
   error: {
     color: '#DC2626',
     fontSize: 13,

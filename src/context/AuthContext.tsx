@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ensureFirebaseInitialized } from '../lib/firebase';
 import type { AuthUser } from '../services/auth';
 import * as authService from '../services/auth';
 
@@ -19,19 +20,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = authService.onAuthStateChanged((nextUser) => {
-      setUser(nextUser);
-      setLoading(false);
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
 
-      if (nextUser) {
-        authService.ensureProfile(nextUser).catch((error) => {
-          if (__DEV__) {
-            console.warn('[auth] ensureProfile on session restore failed', error);
+    ensureFirebaseInitialized()
+      .then(() => {
+        if (cancelled) return;
+        unsubscribe = authService.onAuthStateChanged((nextUser) => {
+          setUser(nextUser);
+          setLoading(false);
+
+          if (nextUser) {
+            authService.ensureProfile(nextUser).catch((error) => {
+              if (__DEV__) {
+                console.warn('[auth] ensureProfile on session restore failed', error);
+              }
+            });
           }
         });
-      }
-    });
-    return unsubscribe;
+      })
+      .catch((error) => {
+        if (__DEV__) {
+          console.error('[auth] Firebase initialization failed', error);
+        }
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, []);
 
   const value = useMemo<AuthContextValue>(

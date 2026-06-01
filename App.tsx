@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { Platform, View, StyleSheet } from 'react-native';
+import { ensureFirebaseInitialized } from './src/lib/firebase';
 import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -9,6 +10,7 @@ import { BottomNav } from './src/components/BottomNav';
 import { SplashScreen } from './src/screens/SplashScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
+import { ForgotPasswordScreen } from './src/screens/ForgotPasswordScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { ScanScreen } from './src/screens/ScanScreen';
 import { ProcessingScreen } from './src/screens/ProcessingScreen';
@@ -25,6 +27,7 @@ const NO_NAV_SCREENS: Screen[] = [
   'splash',
   'login',
   'signup',
+  'forgot-password',
   'scan',
   'processing',
   'fields-list',
@@ -32,7 +35,7 @@ const NO_NAV_SCREENS: Screen[] = [
   'billing',
 ];
 
-const AUTH_SCREENS: Screen[] = ['splash', 'login', 'signup'];
+const AUTH_SCREENS: Screen[] = ['splash', 'login', 'signup', 'forgot-password'];
 
 const TAB_SCREEN_MAP: Record<NavTab, Screen> = {
   home: 'home',
@@ -105,6 +108,8 @@ function AppNavigator() {
         return <LoginScreen onNavigate={navigate} />;
       case 'signup':
         return <SignUpScreen onNavigate={navigate} />;
+      case 'forgot-password':
+        return <ForgotPasswordScreen onNavigate={navigate} />;
       case 'home':
         return <HomeScreen {...screenProps} />;
       case 'scan':
@@ -149,8 +154,20 @@ export default function App() {
   const [fontsLoaded] = useFonts({
     'Gilroy-ExtraBold': require('./assets/fonts/Gilroy-ExtraBold.ttf'),
   });
+  const [firebaseReady, setFirebaseReady] = useState(Platform.OS !== 'web');
 
-  if (!fontsLoaded) {
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    ensureFirebaseInitialized()
+      .then(() => setFirebaseReady(true))
+      .catch((error) => {
+        if (__DEV__) {
+          console.error('[firebase] initialization failed', error);
+        }
+      });
+  }, []);
+
+  if (!fontsLoaded || !firebaseReady) {
     return <View style={[styles.container, { backgroundColor: colors.background }]} />;
   }
 
