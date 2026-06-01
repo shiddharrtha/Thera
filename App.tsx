@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { Screen, NavTab } from './src/types/navigation';
+import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { BottomNav } from './src/components/BottomNav';
 import { SplashScreen } from './src/screens/SplashScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
@@ -31,6 +32,8 @@ const NO_NAV_SCREENS: Screen[] = [
   'billing',
 ];
 
+const AUTH_SCREENS: Screen[] = ['splash', 'login', 'signup'];
+
 const TAB_SCREEN_MAP: Record<NavTab, Screen> = {
   home: 'home',
   scan: 'scan',
@@ -39,33 +42,59 @@ const TAB_SCREEN_MAP: Record<NavTab, Screen> = {
   reports: 'report',
 };
 
-export default function App() {
-  const [fontsLoaded] = useFonts({
-    'Gilroy-ExtraBold': require('./assets/fonts/Gilroy-ExtraBold.ttf'),
-  });
+function AppNavigator() {
+  const { user, loading, busy } = useAuth();
   const [screen, setScreen] = useState<Screen>('splash');
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [history, setHistory] = useState<Screen[]>([]);
 
+  useEffect(() => {
+    if (loading) return;
+
+    if (user) {
+      setScreen((current) => {
+        if (AUTH_SCREENS.includes(current)) {
+          setActiveTab('home');
+          setHistory([]);
+          return 'home';
+        }
+        return current;
+      });
+      return;
+    }
+
+    setScreen((current) => {
+      if (!AUTH_SCREENS.includes(current)) {
+        setHistory([]);
+        return 'splash';
+      }
+      return current;
+    });
+  }, [user, loading]);
+
   const navigate = (s: Screen) => {
+    if (!user && !AUTH_SCREENS.includes(s)) return;
+    if (user && AUTH_SCREENS.includes(s)) return;
+
     setHistory((h) => [...h, screen]);
     setScreen(s);
   };
 
   const goBack = () => {
     const h = [...history];
-    const prev = h.pop() ?? 'home';
+    const prev = h.pop() ?? (user ? 'home' : 'splash');
     setHistory(h);
     setScreen(prev);
   };
 
   const handleTab = (tab: NavTab) => {
+    if (!user) return;
     setActiveTab(tab);
     setHistory([]);
     setScreen(TAB_SCREEN_MAP[tab]);
   };
 
-  const showNav = !NO_NAV_SCREENS.includes(screen);
+  const showNav = user && !NO_NAV_SCREENS.includes(screen);
   const screenProps = { onNavigate: navigate, onBack: goBack };
 
   const renderScreen = () => {
@@ -103,17 +132,33 @@ export default function App() {
   const backgroundColor =
     screen === 'splash' ? 'transparent' : screen === 'scan' ? colors.scanDark : colors.background;
 
+  if (loading || busy) {
+    return <View style={[styles.container, { backgroundColor: colors.background }]} />;
+  }
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['top']}>
+      <StatusBar style={statusBarStyle} />
+      <View style={styles.content}>{renderScreen()}</View>
+      {showNav && <BottomNav active={activeTab} onTab={handleTab} />}
+    </SafeAreaView>
+  );
+}
+
+export default function App() {
+  const [fontsLoaded] = useFonts({
+    'Gilroy-ExtraBold': require('./assets/fonts/Gilroy-ExtraBold.ttf'),
+  });
+
   if (!fontsLoaded) {
     return <View style={[styles.container, { backgroundColor: colors.background }]} />;
   }
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['top']}>
-        <StatusBar style={statusBarStyle} />
-        <View style={styles.content}>{renderScreen()}</View>
-        {showNav && <BottomNav active={activeTab} onTab={handleTab} />}
-      </SafeAreaView>
+      <AuthProvider>
+        <AppNavigator />
+      </AuthProvider>
     </SafeAreaProvider>
   );
 }

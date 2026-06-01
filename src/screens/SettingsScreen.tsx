@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
+import { useAuth } from '../context/AuthContext';
+import { getAuthErrorMessage } from '../services/auth';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
@@ -73,12 +75,29 @@ function Section({ title, children }: { title?: string; children: React.ReactNod
 }
 
 export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
+  const { user, signOut } = useAuth();
   const [notifScans, setNotifScans] = useState(true);
   const [notifAlerts, setNotifAlerts] = useState(true);
   const [notifWeekly, setNotifWeekly] = useState(false);
   const [notifTips, setNotifTips] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
   const [units, setUnits] = useState<'imperial' | 'metric'>('imperial');
+  const [signingOut, setSigningOut] = useState(false);
+
+  const displayName = user?.displayName?.trim() || 'Thera User';
+  const email = user?.email ?? '';
+  const avatarInitial = displayName.charAt(0).toUpperCase() || 'T';
+
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    try {
+      await signOut();
+    } catch (err) {
+      Alert.alert('Sign out failed', getAuthErrorMessage(err));
+    } finally {
+      setSigningOut(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -95,11 +114,11 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         <TouchableOpacity style={styles.profileCard}>
           <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.avatar}>
-            <Text style={styles.avatarText}>A</Text>
+            <Text style={styles.avatarText}>{avatarInitial}</Text>
           </LinearGradient>
           <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>Alex Johnson</Text>
-            <Text style={styles.profileEmail}>alex@greenfarm.com</Text>
+            <Text style={styles.profileName}>{displayName}</Text>
+            <Text style={styles.profileEmail}>{email}</Text>
             <View style={styles.profileBadge}>
               <View style={styles.proBadge}>
                 <Text style={styles.proBadgeText}>Pro Plan</Text>
@@ -154,7 +173,13 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
         </Section>
 
         <Section>
-          <SettingsRow icon="log-out" label="Sign Out" danger onPress={() => onNavigate('splash')} last />
+          <SettingsRow
+            icon="log-out"
+            label={signingOut ? 'Signing out…' : 'Sign Out'}
+            danger
+            onPress={signingOut ? undefined : handleSignOut}
+            last
+          />
         </Section>
 
         <Text style={styles.version}>Thera · Version 1.4.2 · Build 2026.05</Text>

@@ -11,9 +11,13 @@
       "backgroundColor": "#1B6B38"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.thera.app",
+      "googleServicesFile": "./GoogleService-Info.plist"
     },
     "android": {
+      "package": "com.thera.app",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -30,7 +34,20 @@
       [
         "expo-font",
         {
-          "fonts": ["./assets/fonts/Gilroy-ExtraBold.ttf"]
+          "fonts": [
+            "./assets/fonts/Gilroy-ExtraBold.ttf"
+          ]
+        }
+      ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static",
+            "forceStaticLinking": ["RNFBApp", "RNFBAuth"]
+          }
         }
       ]
     ]

@@ -7,11 +7,14 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AuthLogo } from '../components/AuthLogo';
 import { FloatingInput } from '../components/FloatingInput';
+import { useAuth } from '../context/AuthContext';
+import { getAuthErrorMessage } from '../services/auth';
 import type { Screen } from '../types/navigation';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
@@ -38,10 +41,31 @@ function SocialButton({
 }
 
 export function SignUpScreen({ onNavigate }: SignUpScreenProps) {
+  const { signUp } = useAuth();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleRegister = async () => {
+    if (!name.trim() || !email.trim() || !password) {
+      setError('Please fill in all fields.');
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      await signUp(email, password, name);
+    } catch (err) {
+      setError(getAuthErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <KeyboardAvoidingView
@@ -97,9 +121,19 @@ export function SignUpScreen({ onNavigate }: SignUpScreenProps) {
           <Text style={styles.termsLink}>Terms & Conditions</Text>
         </Text>
 
-        <TouchableOpacity onPress={() => onNavigate('home')} activeOpacity={0.85}>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        <TouchableOpacity
+          onPress={handleRegister}
+          activeOpacity={0.85}
+          disabled={submitting}
+        >
           <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.primaryBtn}>
-            <Text style={styles.primaryBtnText}>Register</Text>
+            {submitting ? (
+              <ActivityIndicator color={colors.white} />
+            ) : (
+              <Text style={styles.primaryBtnText}>Register</Text>
+            )}
           </LinearGradient>
         </TouchableOpacity>
 
@@ -160,6 +194,13 @@ const styles = createStyles({
     textAlign: 'center',
   },
   termsLink: { fontWeight: '600', color: colors.primary },
+  error: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
   primaryBtn: {
     paddingVertical: 12,
     borderRadius: 12,

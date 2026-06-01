@@ -7,11 +7,14 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AuthLogo } from '../components/AuthLogo';
 import { FloatingInput } from '../components/FloatingInput';
+import { useAuth } from '../context/AuthContext';
+import { getAuthErrorMessage } from '../services/auth';
 import type { Screen } from '../types/navigation';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
@@ -38,9 +41,30 @@ function SocialButton({
 }
 
 export function LoginScreen({ onNavigate }: LoginScreenProps) {
+  const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleLogin = async () => {
+    if (!email.trim() || !password) {
+      setError('Please enter your email and password.');
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      await signIn(email, password);
+    } catch (err) {
+      setError(getAuthErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <KeyboardAvoidingView
@@ -89,9 +113,19 @@ export function LoginScreen({ onNavigate }: LoginScreenProps) {
           <Text style={styles.forgot}>Forgot Password?</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => onNavigate('home')} activeOpacity={0.85}>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        <TouchableOpacity
+          onPress={handleLogin}
+          activeOpacity={0.85}
+          disabled={submitting}
+        >
           <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.primaryBtn}>
-            <Text style={styles.primaryBtnText}>Login</Text>
+            {submitting ? (
+              <ActivityIndicator color={colors.white} />
+            ) : (
+              <Text style={styles.primaryBtnText}>Login</Text>
+            )}
           </LinearGradient>
         </TouchableOpacity>
 
@@ -145,6 +179,13 @@ const styles = createStyles({
   titleAccent: { color: colors.primary },
   forgotWrap: { alignItems: 'flex-end', marginTop: -6, marginBottom: 20 },
   forgot: { fontSize: 12, fontWeight: '700', color: colors.primary },
+  error: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
   primaryBtn: {
     paddingVertical: 12,
     borderRadius: 12,
