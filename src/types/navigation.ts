@@ -3,14 +3,18 @@ export type Screen =
   | 'login'
   | 'signup'
   | 'forgot-password'
+  | 'setup'
   | 'home'
   | 'scan'
   | 'processing'
+  | 'reports-list'
   | 'report'
   | 'field-map'
   | 'timeline'
   | 'savings'
   | 'fields-list'
+  | 'add-field'
+  | 'field-detail'
   | 'settings'
   | 'billing';
 

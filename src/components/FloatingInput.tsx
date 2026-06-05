@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import { View, Text, TextInput, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  type TextInputProps,
+} from 'react-native';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
@@ -10,6 +16,14 @@ interface FloatingInputProps {
   secureTextEntry?: boolean;
   placeholder?: string;
   right?: React.ReactNode;
+  keyboardType?: TextInputProps['keyboardType'];
+  returnKeyType?: TextInputProps['returnKeyType'];
+  onSubmitEditing?: TextInputProps['onSubmitEditing'];
+  autoCapitalize?: TextInputProps['autoCapitalize'];
+  autoCorrect?: boolean;
+  autoComplete?: TextInputProps['autoComplete'];
+  textContentType?: TextInputProps['textContentType'];
+  blurOnSubmit?: boolean;
 }
 
 export function FloatingInput({
@@ -19,6 +33,14 @@ export function FloatingInput({
   secureTextEntry,
   placeholder,
   right,
+  keyboardType,
+  returnKeyType,
+  onSubmitEditing,
+  autoCapitalize = 'none',
+  autoCorrect = false,
+  autoComplete,
+  textContentType,
+  blurOnSubmit = true,
 }: FloatingInputProps) {
   const [focused, setFocused] = useState(false);
 
@@ -34,6 +56,14 @@ export function FloatingInput({
           secureTextEntry={secureTextEntry}
           placeholder={placeholder}
           placeholderTextColor={colors.gray400}
+          keyboardType={keyboardType}
+          returnKeyType={returnKeyType}
+          onSubmitEditing={onSubmitEditing}
+          autoCapitalize={autoCapitalize}
+          autoCorrect={autoCorrect}
+          autoComplete={autoComplete}
+          textContentType={textContentType}
+          blurOnSubmit={blurOnSubmit}
           style={[
             styles.input,
             focused && styles.inputFocused,

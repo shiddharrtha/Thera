@@ -4,6 +4,12 @@ create table if not exists public.profiles (
   id text primary key,
   email text not null,
   full_name text,
+  farm_name text,
+  primary_region text,
+  default_crop text,
+  preferred_units text check (preferred_units in ('imperial', 'metric')),
+  approximate_acres numeric,
+  onboarding_complete boolean not null default false,
   created_at timestamptz not null default now()
 );
 

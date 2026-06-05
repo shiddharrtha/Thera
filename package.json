@@ -5,6 +5,7 @@
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/datetimepicker": "9.1.0",
     "@react-native-firebase/app": "^24.0.0",
     "@react-native-firebase/auth": "^24.0.0",
     "@supabase/supabase-js": "^2.106.2",
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "pg": "^8.21.0",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -35,7 +37,8 @@
     "ios:setup": "node scripts/ensure-xcode.mjs && cd ios && pod install --repo-update",
     "prebuild": "expo prebuild --clean",
     "web": "expo start --web",
-    "email:setup": "node scripts/setup-resend-email.mjs"
+    "email:setup": "node scripts/setup-resend-email.mjs",
+    "db:migrate-farm-profile": "node scripts/apply-farm-profile-migration.mjs"
   },
   "private": true,
   "engines": {

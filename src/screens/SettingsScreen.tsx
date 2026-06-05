@@ -4,7 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
 import { useAuth } from '../context/AuthContext';
+import { useAppData } from '../context/AppDataContext';
 import { getAuthErrorMessage } from '../services/auth';
+import { getFirstName, getNameInitial } from '../lib/userName';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
@@ -75,18 +77,16 @@ function Section({ title, children }: { title?: string; children: React.ReactNod
 }
 
 export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
-  const { user, signOut } = useAuth();
-  const [notifScans, setNotifScans] = useState(true);
-  const [notifAlerts, setNotifAlerts] = useState(true);
-  const [notifWeekly, setNotifWeekly] = useState(false);
-  const [notifTips, setNotifTips] = useState(true);
-  const [darkMode, setDarkMode] = useState(false);
-  const [units, setUnits] = useState<'imperial' | 'metric'>('imperial');
+  const { user, displayName, signOut } = useAuth();
+  const { data, updateSettings } = useAppData();
+  const settings = data.settings;
+  const farm = data.farmProfile;
+  const planLabel = data.subscription.planId === 'free' ? 'Free Basic' : data.subscription.planId === 'pro' ? 'Pro Plan' : 'Enterprise';
   const [signingOut, setSigningOut] = useState(false);
 
-  const displayName = user?.displayName?.trim() || 'Thera User';
+  const resolvedName = displayName || getFirstName(null, user?.email) || 'Thera User';
   const email = user?.email ?? '';
-  const avatarInitial = displayName.charAt(0).toUpperCase() || 'T';
+  const avatarInitial = getNameInitial(displayName, user?.email);
 
   const handleSignOut = async () => {
     setSigningOut(true);
@@ -117,13 +117,16 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
             <Text style={styles.avatarText}>{avatarInitial}</Text>
           </LinearGradient>
           <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>{displayName}</Text>
+            <Text style={styles.profileName}>{resolvedName}</Text>
             <Text style={styles.profileEmail}>{email}</Text>
             <View style={styles.profileBadge}>
               <View style={styles.proBadge}>
-                <Text style={styles.proBadgeText}>Pro Plan</Text>
+                <Text style={styles.proBadgeText}>{planLabel}</Text>
               </View>
-              <Text style={styles.farmName}>Green Family Farm · Iowa</Text>
+              <Text style={styles.farmName}>
+                {farm?.farmName ?? 'Farm profile incomplete'}
+                {farm?.region ? ` · ${farm.region}` : ''}
+              </Text>
             </View>
           </View>
           <Ionicons name="chevron-forward" size={16} color="#D1D5DB" />
@@ -136,33 +139,33 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
         </Section>
 
         <Section title="FARM & CROPS">
-          <SettingsRow icon="leaf" label="Default Crop Type" sub="Used for new field reports" value="Soybean" />
-          <SettingsRow icon="location" iconBg="#FEF3C7" iconColor="#D97706" label="Primary Region" sub="Affects weather & alerts" value="Iowa" />
+          <SettingsRow icon="leaf" label="Default Crop Type" sub="Used for new field reports" value={farm?.defaultCrop ?? 'Not set'} />
+          <SettingsRow icon="location" iconBg="#FEF3C7" iconColor="#D97706" label="Primary Region" sub="Affects weather & alerts" value={farm?.region ?? 'Not set'} />
           <SettingsRow
             icon="globe"
             iconBg="#EFF6FF"
             iconColor="#3B82F6"
             label="Units"
             sub="Measurement system"
-            value={units === 'imperial' ? 'Imperial (ac, ft)' : 'Metric (ha, m)'}
-            onPress={() => setUnits((u) => (u === 'imperial' ? 'metric' : 'imperial'))}
+            value={farm?.units === 'metric' ? 'Metric (ha, m)' : 'Imperial (ac, ft)'}
+            onPress={() => {}}
             last
           />
         </Section>
 
         <Section title="NOTIFICATIONS">
-          <SettingsRow icon="notifications" iconBg="#FEF3C7" iconColor="#D97706" label="Scan completed" sub="When a new AI report is ready" toggle={{ enabled: notifScans, onToggle: () => setNotifScans((v) => !v) }} />
-          <SettingsRow icon="notifications" iconBg="#FEE2E2" iconColor="#DC2626" label="Field alerts" sub="Weed & stress threshold alerts" toggle={{ enabled: notifAlerts, onToggle: () => setNotifAlerts((v) => !v) }} />
-          <SettingsRow icon="notifications" iconBg="#EFF6FF" iconColor="#3B82F6" label="Weekly digest" sub="Field summary every Monday" toggle={{ enabled: notifWeekly, onToggle: () => setNotifWeekly((v) => !v) }} />
-          <SettingsRow icon="notifications" label="Tips & best practices" sub="Agronomy advice from Thera" toggle={{ enabled: notifTips, onToggle: () => setNotifTips((v) => !v) }} last />
+          <SettingsRow icon="notifications" iconBg="#FEF3C7" iconColor="#D97706" label="Scan completed" sub="When a new AI report is ready" toggle={{ enabled: settings.scanCompletedNotifications, onToggle: () => updateSettings({ scanCompletedNotifications: !settings.scanCompletedNotifications }) }} />
+          <SettingsRow icon="notifications" iconBg="#FEE2E2" iconColor="#DC2626" label="Field alerts" sub="Weed & stress threshold alerts" toggle={{ enabled: settings.fieldAlerts, onToggle: () => updateSettings({ fieldAlerts: !settings.fieldAlerts }) }} />
+          <SettingsRow icon="notifications" iconBg="#EFF6FF" iconColor="#3B82F6" label="Weekly digest" sub="Field summary every Monday" toggle={{ enabled: settings.weeklyDigest, onToggle: () => updateSettings({ weeklyDigest: !settings.weeklyDigest }) }} />
+          <SettingsRow icon="notifications" label="Tips & best practices" sub="Agronomy advice from Thera" toggle={{ enabled: settings.tipsAndBestPractices, onToggle: () => updateSettings({ tipsAndBestPractices: !settings.tipsAndBestPractices }) }} last />
         </Section>
 
         <Section title="APPEARANCE">
-          <SettingsRow icon="moon" iconBg="#F5F3FF" iconColor="#7C3AED" label="Dark Mode" sub="Easy on the eyes at night" toggle={{ enabled: darkMode, onToggle: () => setDarkMode((v) => !v) }} last />
+          <SettingsRow icon="moon" iconBg="#F5F3FF" iconColor="#7C3AED" label="Dark Mode" sub="Easy on the eyes at night" toggle={{ enabled: settings.darkMode, onToggle: () => updateSettings({ darkMode: !settings.darkMode }) }} last />
         </Section>
 
         <Section title="PLAN & BILLING">
-          <SettingsRow icon="flash" iconBg={colors.accent} label="Billing & Plans" sub="Pro Plan · $49/mo · Renews Jun 1" onPress={() => onNavigate('billing')} />
+          <SettingsRow icon="flash" iconBg={colors.accent} label="Billing & Plans" sub={`${planLabel}${data.subscription.planId === 'pro' ? ' · $49/mo' : ''}`} onPress={() => onNavigate('billing')} />
           <SettingsRow icon="document-text" iconBg={colors.background} iconColor={colors.gray500} label="Invoices & Receipts" sub="Download past invoices" last />
         </Section>
 

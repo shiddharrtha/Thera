@@ -46,10 +46,14 @@
         {
           "ios": {
             "useFrameworks": "static",
-            "forceStaticLinking": ["RNFBApp", "RNFBAuth"]
+            "forceStaticLinking": [
+              "RNFBApp",
+              "RNFBAuth"
+            ]
           }
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ]
   }
 }

@@ -1,19 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
-  ScrollView,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AuthLogo } from '../components/AuthLogo';
 import { FloatingInput } from '../components/FloatingInput';
+import { KeyboardFormScreen } from '../components/KeyboardFormScreen';
 import { useAuth } from '../context/AuthContext';
+import { useAppData } from '../context/AppDataContext';
 import { getAuthErrorMessage } from '../services/auth';
 import type { Screen } from '../types/navigation';
 import { colors } from '../theme/colors';
@@ -21,6 +20,7 @@ import { createStyles } from '../theme/createStyles';
 
 interface LoginScreenProps {
   onNavigate: (s: Screen) => void;
+  onAuthenticated?: () => void;
 }
 
 function SocialButton({
@@ -40,13 +40,22 @@ function SocialButton({
   );
 }
 
-export function LoginScreen({ onNavigate }: LoginScreenProps) {
-  const { signIn } = useAuth();
+export function LoginScreen({ onNavigate, onAuthenticated }: LoginScreenProps) {
+  const { signIn, user, loading: authLoading } = useAuth();
+  const { loading: dataLoading } = useAppData();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingRedirect, setPendingRedirect] = useState(false);
+
+  useEffect(() => {
+    if (!pendingRedirect || authLoading || dataLoading || !user) return;
+    setPendingRedirect(false);
+    setSubmitting(false);
+    onAuthenticated?.();
+  }, [pendingRedirect, authLoading, dataLoading, user, onAuthenticated]);
 
   const handleLogin = async () => {
     if (!email.trim() || !password) {
@@ -59,31 +68,26 @@ export function LoginScreen({ onNavigate }: LoginScreenProps) {
 
     try {
       await signIn(email, password);
+      setPendingRedirect(true);
     } catch (err) {
       setError(getAuthErrorMessage(err));
-    } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardFormScreen
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      scrollContentStyle={styles.scrollContent}
+      header={
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => onNavigate('splash')} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={20} color={colors.gray900} />
+          </TouchableOpacity>
+        </View>
+      }
     >
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => onNavigate('splash')} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={20} color={colors.gray900} />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.form}>
+      <View style={styles.form}>
         <AuthLogo />
         <Text style={styles.title}>
           Welcome{'\n'}
@@ -95,6 +99,11 @@ export function LoginScreen({ onNavigate }: LoginScreenProps) {
           value={email}
           onChange={setEmail}
           placeholder="mail@mail.com"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoComplete="email"
+          textContentType="emailAddress"
+          returnKeyType="next"
         />
         <FloatingInput
           label="Password"
@@ -102,6 +111,11 @@ export function LoginScreen({ onNavigate }: LoginScreenProps) {
           onChange={setPassword}
           placeholder="Enter password"
           secureTextEntry={!showPw}
+          autoCapitalize="none"
+          autoComplete="password"
+          textContentType="password"
+          returnKeyType="done"
+          onSubmitEditing={handleLogin}
           right={
             <TouchableOpacity onPress={() => setShowPw((v) => !v)} hitSlop={8}>
               <Ionicons name={showPw ? 'eye-off' : 'eye'} size={18} color={colors.gray400} />
@@ -149,9 +163,8 @@ export function LoginScreen({ onNavigate }: LoginScreenProps) {
             Register
           </Text>
         </Text>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </View>
+    </KeyboardFormScreen>
   );
 }
 
@@ -159,13 +172,11 @@ const styles = createStyles({
   container: { flex: 1, backgroundColor: colors.white },
   header: { paddingHorizontal: 16, paddingTop: 8 },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  scroll: { flex: 1 },
   scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     paddingHorizontal: 24,
-    paddingVertical: 24,
+    paddingTop: 16,
+    paddingBottom: 120,
+    alignItems: 'center',
   },
   form: {
     width: '100%',

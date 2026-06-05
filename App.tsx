@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Platform, View, StyleSheet } from 'react-native';
 import { ensureFirebaseInitialized } from './src/lib/firebase';
 import { useFonts } from 'expo-font';
@@ -6,66 +6,92 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { Screen, NavTab } from './src/types/navigation';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
+import { AppDataProvider, useAppData } from './src/context/AppDataContext';
 import { BottomNav } from './src/components/BottomNav';
 import { SplashScreen } from './src/screens/SplashScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
 import { ForgotPasswordScreen } from './src/screens/ForgotPasswordScreen';
+import { FarmSetupScreen } from './src/screens/FarmSetupScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { ScanScreen } from './src/screens/ScanScreen';
 import { ProcessingScreen } from './src/screens/ProcessingScreen';
+import { ReportsListScreen } from './src/screens/ReportsListScreen';
 import { ReportScreen } from './src/screens/ReportScreen';
 import { FieldMapScreen } from './src/screens/FieldMapScreen';
 import { TimelineScreen } from './src/screens/TimelineScreen';
 import { SavingsScreen } from './src/screens/SavingsScreen';
 import { FieldsListScreen } from './src/screens/FieldsListScreen';
+import { AddFieldScreen } from './src/screens/AddFieldScreen';
+import { FieldDetailScreen } from './src/screens/FieldDetailScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { BillingScreen } from './src/screens/BillingScreen';
 import { colors } from './src/theme/colors';
 
-const NO_NAV_SCREENS: Screen[] = [
-  'splash',
-  'login',
-  'signup',
-  'forgot-password',
-  'scan',
-  'processing',
-  'fields-list',
-  'settings',
-  'billing',
-];
-
 const AUTH_SCREENS: Screen[] = ['splash', 'login', 'signup', 'forgot-password'];
+const SETUP_SCREENS: Screen[] = ['setup'];
 
 const TAB_SCREEN_MAP: Record<NavTab, Screen> = {
   home: 'home',
   scan: 'scan',
   fields: 'fields-list',
   savings: 'savings',
-  reports: 'report',
+  reports: 'reports-list',
+};
+
+const SCREEN_TO_TAB: Partial<Record<Screen, NavTab>> = {
+  home: 'home',
+  scan: 'scan',
+  'fields-list': 'fields',
+  savings: 'savings',
+  'reports-list': 'reports',
+  report: 'reports',
 };
 
 function AppNavigator() {
-  const { user, loading, busy } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const { loading: dataLoading, data, resetForSignOut } = useAppData();
   const [screen, setScreen] = useState<Screen>('splash');
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [history, setHistory] = useState<Screen[]>([]);
 
+  const completeLogin = useCallback(() => {
+    setHistory([]);
+    setActiveTab('home');
+    setScreen('home');
+  }, []);
+
+  const completeRegistration = useCallback(() => {
+    setHistory([]);
+    setActiveTab('home');
+    setScreen('setup');
+  }, []);
+
   useEffect(() => {
-    if (loading) return;
+    if (authLoading || dataLoading) return;
 
     if (user) {
       setScreen((current) => {
-        if (AUTH_SCREENS.includes(current)) {
-          setActiveTab('home');
+        if (current === 'splash') return current;
+
+        if (current === 'signup') {
           setHistory([]);
+          setActiveTab('home');
+          return 'setup';
+        }
+
+        if (current === 'login' || current === 'forgot-password') {
+          setHistory([]);
+          setActiveTab('home');
           return 'home';
         }
+
         return current;
       });
       return;
     }
 
+    resetForSignOut();
     setScreen((current) => {
       if (!AUTH_SCREENS.includes(current)) {
         setHistory([]);
@@ -73,11 +99,43 @@ function AppNavigator() {
       }
       return current;
     });
-  }, [user, loading]);
+  }, [user, authLoading, dataLoading, data.onboardingComplete, resetForSignOut]);
 
   const navigate = (s: Screen) => {
     if (!user && !AUTH_SCREENS.includes(s)) return;
+
+    if (user && screen === 'splash' && s === 'login') {
+      setActiveTab('home');
+      setHistory([]);
+      setScreen('home');
+      return;
+    }
+
+    if (screen === 'splash' && s === 'signup') {
+      setHistory([]);
+      setScreen('signup');
+      return;
+    }
+
+    if (AUTH_SCREENS.includes(s) && AUTH_SCREENS.includes(screen)) {
+      setHistory((h) => [...h, screen]);
+      setScreen(s);
+      return;
+    }
+
     if (user && AUTH_SCREENS.includes(s)) return;
+
+    if (user && (s === 'home' || s === 'setup')) {
+      setHistory([]);
+      setActiveTab('home');
+      setScreen(s === 'setup' || !data.onboardingComplete ? 'setup' : 'home');
+      return;
+    }
+
+    if (user && !data.onboardingComplete && SETUP_SCREENS.includes(screen) && s !== 'add-field') return;
+
+    const tab = SCREEN_TO_TAB[s];
+    if (tab) setActiveTab(tab);
 
     setHistory((h) => [...h, screen]);
     setScreen(s);
@@ -85,7 +143,7 @@ function AppNavigator() {
 
   const goBack = () => {
     const h = [...history];
-    const prev = h.pop() ?? (user ? 'home' : 'splash');
+    const prev = h.pop() ?? (user ? (data.onboardingComplete ? 'home' : 'setup') : 'splash');
     setHistory(h);
     setScreen(prev);
   };
@@ -97,7 +155,10 @@ function AppNavigator() {
     setScreen(TAB_SCREEN_MAP[tab]);
   };
 
-  const showNav = user && !NO_NAV_SCREENS.includes(screen);
+  const showNav =
+    user &&
+    !AUTH_SCREENS.includes(screen) &&
+    !SETUP_SCREENS.includes(screen);
   const screenProps = { onNavigate: navigate, onBack: goBack };
 
   const renderScreen = () => {
@@ -105,17 +166,21 @@ function AppNavigator() {
       case 'splash':
         return <SplashScreen onNavigate={navigate} />;
       case 'login':
-        return <LoginScreen onNavigate={navigate} />;
+        return <LoginScreen onNavigate={navigate} onAuthenticated={completeLogin} />;
       case 'signup':
-        return <SignUpScreen onNavigate={navigate} />;
+        return <SignUpScreen onNavigate={navigate} onRegistered={completeRegistration} />;
       case 'forgot-password':
         return <ForgotPasswordScreen onNavigate={navigate} />;
+      case 'setup':
+        return <FarmSetupScreen {...screenProps} />;
       case 'home':
         return <HomeScreen {...screenProps} />;
       case 'scan':
         return <ScanScreen {...screenProps} />;
       case 'processing':
         return <ProcessingScreen {...screenProps} />;
+      case 'reports-list':
+        return <ReportsListScreen {...screenProps} />;
       case 'report':
         return <ReportScreen {...screenProps} />;
       case 'field-map':
@@ -126,6 +191,10 @@ function AppNavigator() {
         return <SavingsScreen {...screenProps} />;
       case 'fields-list':
         return <FieldsListScreen {...screenProps} />;
+      case 'add-field':
+        return <AddFieldScreen {...screenProps} />;
+      case 'field-detail':
+        return <FieldDetailScreen {...screenProps} />;
       case 'settings':
         return <SettingsScreen {...screenProps} />;
       case 'billing':
@@ -137,8 +206,15 @@ function AppNavigator() {
   const backgroundColor =
     screen === 'splash' ? 'transparent' : screen === 'scan' ? colors.scanDark : colors.background;
 
-  if (loading || busy) {
-    return <View style={[styles.container, { backgroundColor: colors.background }]} />;
+  if (authLoading) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: 'transparent' }]} edges={['top']}>
+        <StatusBar style="light" />
+        <View style={styles.content}>
+          <SplashScreen onNavigate={() => {}} />
+        </View>
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -174,7 +250,9 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <AppNavigator />
+        <AppDataProvider>
+          <AppNavigator />
+        </AppDataProvider>
       </AuthProvider>
     </SafeAreaProvider>
   );

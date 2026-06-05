@@ -3,43 +3,59 @@ import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
+import { useAppData } from '../context/AppDataContext';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
 const STEPS = [
-  'Uploading video',
-  'Extracting frames',
+  'Uploading scan',
+  'Validating scan quality',
   'Detecting weeds',
-  'Checking crop stress',
-  'Comparing previous scans',
-  'Generating report',
+  'Assessing crop health',
+  'Mapping problem areas',
+  'Generating recommendations',
+  'Preparing report',
 ];
 
 export function ProcessingScreen({ onNavigate }: ScreenProps) {
+  const { selectedScanId, getScan, advanceScanProgress, completeScan } = useAppData();
+  const scan = selectedScanId ? getScan(selectedScanId) : undefined;
+  const isFirstScan = scan?.isFirstScan ?? false;
+
   const [currentStep, setCurrentStep] = useState(0);
   const [done, setDone] = useState(false);
   const [scanLine, setScanLine] = useState(0);
 
   useEffect(() => {
-    const t = setInterval(() => {
+    if (!selectedScanId) return;
+
+    const interval = setInterval(async () => {
       setCurrentStep((s) => {
-        if (s >= STEPS.length - 1) {
-          clearInterval(t);
-          setTimeout(() => setDone(true), 600);
-          return s;
+        const next = s + 1;
+        const progress = Math.round((next / STEPS.length) * 100);
+        void advanceScanProgress(
+          selectedScanId,
+          Math.min(progress, 99),
+          next < STEPS.length ? 'processing' : 'processing',
+        );
+        if (next >= STEPS.length) {
+          clearInterval(interval);
+          void completeScan(selectedScanId).then(() => setDone(true));
+          return STEPS.length - 1;
         }
-        return s + 1;
+        return next;
       });
     }, 900);
-    return () => clearInterval(t);
-  }, []);
+
+    return () => clearInterval(interval);
+  }, [selectedScanId, advanceScanProgress, completeScan]);
 
   useEffect(() => {
     const t = setInterval(() => setScanLine((s) => (s + 1) % 100), 20);
     return () => clearInterval(t);
   }, []);
 
-  const progress = done ? 100 : Math.round((currentStep / (STEPS.length - 1)) * 100);
+  const progress = done ? 100 : Math.round(((currentStep + 1) / STEPS.length) * 100);
 
   return (
     <View style={styles.container}>
@@ -48,8 +64,14 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
           <Ionicons name="leaf" size={36} color={colors.white} />
           <View style={[styles.scanLine, { top: `${scanLine}%` }]} />
         </LinearGradient>
-        <Text style={styles.title}>Generating Field Report</Text>
-        <Text style={styles.subtitle}>AI is analyzing your crop scan</Text>
+        <Text style={styles.title}>
+          {isFirstScan ? 'Analyzing Your First Scan' : 'Generating Field Report'}
+        </Text>
+        <Text style={styles.subtitle}>
+          {isFirstScan
+            ? 'Thera is checking the scan for weeds, crop stress, and potential treatment areas.'
+            : 'AI is analyzing your crop scan'}
+        </Text>
         <View style={styles.progressRow}>
           <View style={styles.progressTrack}>
             <View style={[styles.progressFill, { width: `${progress}%` }]} />
@@ -65,13 +87,7 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
           return (
             <View key={step} style={styles.stepRow}>
               <View style={styles.stepIndicatorCol}>
-                <View
-                  style={[
-                    styles.stepDot,
-                    completed && styles.stepDotDone,
-                    active && styles.stepDotActive,
-                  ]}
-                >
+                <View style={[styles.stepDot, completed && styles.stepDotDone, active && styles.stepDotActive]}>
                   {completed ? (
                     <Ionicons name="checkmark-circle" size={16} color={colors.white} />
                   ) : active ? (
@@ -85,13 +101,7 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
                 )}
               </View>
               <View style={styles.stepContent}>
-                <Text
-                  style={[
-                    styles.stepLabel,
-                    completed && styles.stepLabelDone,
-                    active && styles.stepLabelActive,
-                  ]}
-                >
+                <Text style={[styles.stepLabel, completed && styles.stepLabelDone, active && styles.stepLabelActive]}>
                   {step}
                 </Text>
                 {active && <Text style={styles.stepProcessing}>Processing...</Text>}
@@ -111,7 +121,9 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
           </TouchableOpacity>
         ) : (
           <View style={styles.waitCard}>
-            <Text style={styles.waitText}>We'll notify you when your report is ready.</Text>
+            <Text style={styles.waitText}>
+              You can leave this screen. We will notify you when the report is ready.
+            </Text>
           </View>
         )}
       </View>
@@ -131,23 +143,11 @@ const styles = createStyles({
     marginBottom: 20,
     overflow: 'hidden',
   },
-  scanLine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.6)',
-  },
-  title: { fontSize: 20, fontWeight: '900', color: colors.gray900, marginBottom: 4 },
-  subtitle: { fontSize: 14, color: colors.gray400 },
+  scanLine: { position: 'absolute', left: 0, right: 0, height: 2, backgroundColor: 'rgba(255,255,255,0.6)' },
+  title: { fontSize: 20, fontWeight: '900', color: colors.gray900, marginBottom: 4, textAlign: 'center' },
+  subtitle: { fontSize: 14, color: colors.gray400, textAlign: 'center', paddingHorizontal: 12 },
   progressRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16, width: '100%' },
-  progressTrack: {
-    flex: 1,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.gray100,
-    overflow: 'hidden',
-  },
+  progressTrack: { flex: 1, height: 8, borderRadius: 4, backgroundColor: colors.gray100, overflow: 'hidden' },
   progressFill: { height: '100%', backgroundColor: colors.primary, borderRadius: 4 },
   progressText: { fontSize: 12, fontWeight: '700', color: colors.primary },
   steps: { flex: 1 },
@@ -186,11 +186,6 @@ const styles = createStyles({
     elevation: 6,
   },
   doneBtnText: { color: colors.white, fontWeight: '700', fontSize: 16 },
-  waitCard: {
-    backgroundColor: colors.background,
-    borderRadius: 16,
-    padding: 16,
-    alignItems: 'center',
-  },
-  waitText: { fontSize: 14, color: colors.gray500 },
+  waitCard: { backgroundColor: colors.background, borderRadius: 16, padding: 16, alignItems: 'center' },
+  waitText: { fontSize: 14, color: colors.gray500, textAlign: 'center' },
 });

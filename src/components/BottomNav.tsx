@@ -1,4 +1,5 @@
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import type { NavTab } from '../types/navigation';
@@ -20,6 +21,8 @@ interface BottomNavProps {
 }
 
 export function BottomNav({ active, onTab }: BottomNavProps) {
+  const insets = useSafeAreaInsets();
+
   const renderTab = (tab: (typeof LEFT_TABS)[0]) => {
     const isActive = active === tab.id;
     return (
@@ -31,7 +34,7 @@ export function BottomNav({ active, onTab }: BottomNavProps) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 8) }]}>
       {LEFT_TABS.map(renderTab)}
       <TouchableOpacity style={styles.scanTab} onPress={() => onTab('scan')}>
         <View style={[styles.scanButton, active === 'scan' && styles.scanButtonActive]}>
@@ -54,8 +57,7 @@ const styles = createStyles({
     borderTopColor: colors.border,
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 4,
-    height: 60,
+    minHeight: 60,
   },
   tab: {
     flex: 1,

@@ -73,6 +73,31 @@ async function upsertProfileWithRetry(userId: string, email: string, fullName: s
   throw new Error(`Could not save your profile (${detail}). Try signing in again.`);
 }
 
+/** Load the user's full name from Supabase when Firebase displayName is missing. */
+export async function fetchProfileFullName(userId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from('profiles')
+    .select('full_name')
+    .eq('id', userId)
+    .maybeSingle();
+
+  return data?.full_name?.trim() || null;
+}
+
+export async function resolveDisplayName(user: AuthUser): Promise<string | null> {
+  const fromFirebase = user.displayName?.trim();
+  if (fromFirebase) return fromFirebase;
+  return fetchProfileFullName(user.uid);
+}
+
+/** Force-save the user's display name to Supabase (retries until JWT is ready). */
+export async function syncFullName(user: AuthUser, fullName: string) {
+  const email = user.email;
+  const trimmed = fullName.trim();
+  if (!email || !trimmed) return;
+  await upsertProfileWithRetry(user.uid, email, trimmed);
+}
+
 /** Create or update the Supabase profile for the current Firebase user. */
 export async function ensureProfile(user: AuthUser, options?: { fullName?: string }) {
   const email = user.email;
@@ -88,12 +113,16 @@ export async function ensureProfile(user: AuthUser, options?: { fullName?: strin
     .eq('id', user.uid)
     .maybeSingle();
 
+  const existingName = data?.full_name?.trim() ?? '';
+  // Never overwrite a saved name with an empty string (avoids auth-state race on signup).
+  const nameToSave = fullName || existingName;
+
   const needsRow = !data;
-  const needsName = Boolean(fullName && data?.full_name !== fullName);
+  const needsNameUpdate = Boolean(nameToSave && existingName !== nameToSave);
 
-  if (!needsRow && !needsName) return;
+  if (!needsRow && !needsNameUpdate) return;
 
-  await upsertProfileWithRetry(user.uid, email, fullName);
+  await upsertProfileWithRetry(user.uid, email, nameToSave);
 }
 
 const FUNCTIONS_ERROR_MESSAGES: Record<string, string> = {
@@ -166,7 +195,12 @@ export async function signUp(email: string, password: string, fullName: string) 
       await user.reload();
     }
 
-    await ensureProfile(user, { fullName: trimmedName });
+    const current = firebaseAuth().currentUser ?? user;
+    if (trimmedName) {
+      await syncFullName(current, trimmedName);
+    } else {
+      await ensureProfile(current);
+    }
   } catch (error) {
     try {
       await user.delete();
@@ -182,7 +216,15 @@ export async function signUp(email: string, password: string, fullName: string) 
 export async function signIn(email: string, password: string) {
   const { user } = await firebaseAuth().signInWithEmailAndPassword(email.trim(), password);
   await refreshFirebaseToken(true);
-  await ensureProfile(user);
+  try {
+    await ensureProfile(user);
+    const name = user.displayName?.trim();
+    if (name) await syncFullName(user, name);
+  } catch (error) {
+    if (__DEV__) {
+      console.warn('[auth] ensureProfile on signIn failed', error);
+    }
+  }
   return user;
 }
 
