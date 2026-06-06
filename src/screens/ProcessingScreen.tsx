@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
 import { useAppData } from '../context/AppDataContext';
+import { getScanVideoErrorMessage } from '../services/scanUpload';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
@@ -17,45 +18,108 @@ const STEPS = [
   'Preparing report',
 ];
 
+const UPLOAD_PROGRESS_MAX = 30;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function ProcessingScreen({ onNavigate }: ScreenProps) {
-  const { selectedScanId, getScan, advanceScanProgress, completeScan } = useAppData();
+  const {
+    selectedScanId,
+    getScan,
+    uploadScanVideo,
+    advanceScanProgress,
+    completeScan,
+  } = useAppData();
   const scan = selectedScanId ? getScan(selectedScanId) : undefined;
   const isFirstScan = scan?.isFirstScan ?? false;
 
   const [currentStep, setCurrentStep] = useState(0);
   const [done, setDone] = useState(false);
   const [scanLine, setScanLine] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [overallProgress, setOverallProgress] = useState(0);
+  const pipelineScanIdRef = useRef<string | null>(null);
+  const getScanRef = useRef(getScan);
+  const uploadScanVideoRef = useRef(uploadScanVideo);
+  const advanceScanProgressRef = useRef(advanceScanProgress);
+  const completeScanRef = useRef(completeScan);
+
+  getScanRef.current = getScan;
+  uploadScanVideoRef.current = uploadScanVideo;
+  advanceScanProgressRef.current = advanceScanProgress;
+  completeScanRef.current = completeScan;
 
   useEffect(() => {
-    if (!selectedScanId) return;
+    if (!selectedScanId || pipelineScanIdRef.current === selectedScanId) return;
+    pipelineScanIdRef.current = selectedScanId;
 
-    const interval = setInterval(async () => {
-      setCurrentStep((s) => {
-        const next = s + 1;
-        const progress = Math.round((next / STEPS.length) * 100);
-        void advanceScanProgress(
-          selectedScanId,
-          Math.min(progress, 99),
-          next < STEPS.length ? 'processing' : 'processing',
-        );
-        if (next >= STEPS.length) {
-          clearInterval(interval);
-          void completeScan(selectedScanId).then(() => setDone(true));
-          return STEPS.length - 1;
+    let cancelled = false;
+
+    async function runPipeline() {
+      const scanId = selectedScanId!;
+      const initialScan = getScanRef.current(scanId);
+      if (!initialScan) return;
+
+      setCurrentStep(0);
+      setUploadError(null);
+      setDone(false);
+      setOverallProgress(0);
+
+      if (initialScan.videoUri && !initialScan.videoUrl) {
+        try {
+          await uploadScanVideoRef.current(scanId, (uploadPercent) => {
+            if (cancelled) return;
+            const progress = Math.round((uploadPercent / 100) * UPLOAD_PROGRESS_MAX);
+            setOverallProgress(progress);
+          });
+        } catch (error) {
+          if (cancelled) return;
+          setUploadError(getScanVideoErrorMessage(error));
+          await advanceScanProgressRef.current(scanId, UPLOAD_PROGRESS_MAX, 'processing');
+          setOverallProgress(UPLOAD_PROGRESS_MAX);
         }
-        return next;
-      });
-    }, 900);
+      } else {
+        await advanceScanProgressRef.current(scanId, UPLOAD_PROGRESS_MAX, 'processing');
+        setOverallProgress(UPLOAD_PROGRESS_MAX);
+      }
 
-    return () => clearInterval(interval);
-  }, [selectedScanId, advanceScanProgress, completeScan]);
+      if (cancelled) return;
+      setCurrentStep(1);
+
+      for (let step = 1; step < STEPS.length; step++) {
+        if (cancelled) return;
+
+        setCurrentStep(step);
+        const analysisProgress =
+          UPLOAD_PROGRESS_MAX +
+          Math.round((step / (STEPS.length - 1)) * (99 - UPLOAD_PROGRESS_MAX));
+        const clamped = Math.min(analysisProgress, 99);
+        setOverallProgress(clamped);
+        await advanceScanProgressRef.current(scanId, clamped, 'processing');
+        await sleep(900);
+      }
+
+      if (cancelled) return;
+      await completeScanRef.current(scanId);
+      setOverallProgress(100);
+      setDone(true);
+    }
+
+    void runPipeline();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedScanId]);
 
   useEffect(() => {
     const t = setInterval(() => setScanLine((s) => (s + 1) % 100), 20);
     return () => clearInterval(t);
   }, []);
 
-  const progress = done ? 100 : Math.round(((currentStep + 1) / STEPS.length) * 100);
+  const progress = done ? 100 : overallProgress;
 
   return (
     <View style={styles.container}>
@@ -68,10 +132,17 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
           {isFirstScan ? 'Analyzing Your First Scan' : 'Generating Field Report'}
         </Text>
         <Text style={styles.subtitle}>
-          {isFirstScan
-            ? 'Thera is checking the scan for weeds, crop stress, and potential treatment areas.'
-            : 'AI is analyzing your crop scan'}
+          {currentStep === 0 && !done
+            ? 'Uploading your field video to the cloud...'
+            : isFirstScan
+              ? 'Thera is checking the scan for weeds, crop stress, and potential treatment areas.'
+              : 'AI is analyzing your crop scan'}
         </Text>
+        {uploadError && (
+          <Text style={styles.uploadWarning}>
+            Upload skipped: {uploadError} Analysis will continue with the local scan.
+          </Text>
+        )}
         <View style={styles.progressRow}>
           <View style={styles.progressTrack}>
             <View style={[styles.progressFill, { width: `${progress}%` }]} />
@@ -104,7 +175,11 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
                 <Text style={[styles.stepLabel, completed && styles.stepLabelDone, active && styles.stepLabelActive]}>
                   {step}
                 </Text>
-                {active && <Text style={styles.stepProcessing}>Processing...</Text>}
+                {active && (
+                  <Text style={styles.stepProcessing}>
+                    {i === 0 ? 'Uploading video...' : 'Processing...'}
+                  </Text>
+                )}
                 {completed && <Text style={styles.stepComplete}>Complete</Text>}
               </View>
             </View>
@@ -146,6 +221,13 @@ const styles = createStyles({
   scanLine: { position: 'absolute', left: 0, right: 0, height: 2, backgroundColor: 'rgba(255,255,255,0.6)' },
   title: { fontSize: 20, fontWeight: '900', color: colors.gray900, marginBottom: 4, textAlign: 'center' },
   subtitle: { fontSize: 14, color: colors.gray400, textAlign: 'center', paddingHorizontal: 12 },
+  uploadWarning: {
+    marginTop: 10,
+    fontSize: 12,
+    color: colors.warningText,
+    textAlign: 'center',
+    paddingHorizontal: 8,
+  },
   progressRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16, width: '100%' },
   progressTrack: { flex: 1, height: 8, borderRadius: 4, backgroundColor: colors.gray100, overflow: 'hidden' },
   progressFill: { height: '100%', backgroundColor: colors.primary, borderRadius: 4 },

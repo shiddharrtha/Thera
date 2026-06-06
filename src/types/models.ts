@@ -52,6 +52,7 @@ export interface Field {
   healthScore?: number;
   openIssues: number;
   totalSavings: number;
+  /** ISO-8601 UTC — last completed scan time. Format with formatOptionalDisplayDateTime for UI. */
   lastScanDate?: string;
   status: FieldStatus;
   plantingDate?: string;
@@ -68,16 +69,46 @@ export interface DetectedIssue {
   action: string;
 }
 
+export interface GpsPoint {
+  latitude: number;
+  longitude: number;
+  timestamp: string;
+  accuracy?: number;
+}
+
+export interface ScanCapture {
+  videoUri: string;
+  durationSeconds: number;
+  gpsTrack: GpsPoint[];
+  /** UTC epoch ms — when recording started (source of truth). */
+  recordedAtMs: number;
+  /** UTC epoch ms — when recording stopped. */
+  recordedEndAtMs: number;
+  /** ISO-8601 UTC — derived from recordedAtMs for storage. */
+  recordedAt: string;
+  /** ISO-8601 UTC — derived from recordedEndAtMs for storage. */
+  recordedEndAt: string;
+}
+
 export interface Scan {
   id: string;
   fieldId: string;
+  /** ISO-8601 UTC — when the field scan was recorded (for storage/sync). */
   createdAt: string;
+  /** UTC epoch ms — when recording started (preferred for display). */
+  recordedAtMs?: number;
+  /** ISO-8601 UTC — when processing finished. */
+  completedAt?: string;
   status: ScanStatus;
   progress: number;
   weedCoverage?: number;
   stressCoverage?: number;
   healthScore?: number;
   isFirstScan: boolean;
+  videoUri?: string;
+  videoUrl?: string;
+  videoDurationSeconds?: number;
+  gpsTrack?: GpsPoint[];
 }
 
 export interface Report {
@@ -85,6 +116,8 @@ export interface Report {
   scanId: string;
   fieldId: string;
   createdAt: string;
+  /** UTC epoch ms — when the scan was recorded (preferred for display). */
+  recordedAtMs?: number;
   summary: string;
   recommendedSprayAcres: number;
   estimatedSavings: number;

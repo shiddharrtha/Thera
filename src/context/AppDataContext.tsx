@@ -9,7 +9,16 @@ import {
 } from 'react';
 import { useAuth } from './AuthContext';
 import { clearAppData, loadAppData, saveAppData } from '../lib/appStorage';
+import {
+  completeScanRemote,
+  createField,
+  createScan,
+  fetchFieldData,
+  migrateLocalFieldData,
+  updateScan,
+} from '../services/fieldData';
 import { fetchFarmProfile, saveFarmProfile } from '../services/profile';
+import { uploadScanVideoFile } from '../services/scanUpload';
 import type {
   AppDataState,
   CostAssumptions,
@@ -17,20 +26,14 @@ import type {
   Field,
   Report,
   Scan,
+  ScanCapture,
   UserSettings,
 } from '../types/models';
 import { DEFAULT_SETTINGS, FREE_LIMITS } from '../types/models';
+import { toIsoTimestamp, normalizeFieldTimestamps, normalizeScanTimestamps, getScanRecordedAtMs } from '../utils/timestamps';
 
 function createId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function formatScanDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
 }
 
 function deriveFieldStatus(healthScore?: number, openIssues?: number): Field['status'] {
@@ -49,11 +52,14 @@ function generateReportFromScan(field: Field, scan: Scan): Report {
   const estimatedSavings = Math.round(recommendedSprayAcres * 12 + field.acreage * 4);
   const chemicalReductionPercent = Math.round(100 - (recommendedSprayAcres / field.acreage) * 100);
 
+  const recordedAtMs = getScanRecordedAtMs(scan);
+
   return {
     id: createId('report'),
     scanId: scan.id,
     fieldId: field.id,
-    createdAt: scan.createdAt,
+    createdAt: toIsoTimestamp(recordedAtMs),
+    recordedAtMs,
     summary: `Detected moderate weed pressure (${weedCoverage}%) and low crop stress (${stressCoverage}%) across ${field.name}. Targeted treatment recommended for ${recommendedSprayAcres} acres.`,
     recommendedSprayAcres,
     estimatedSavings,
@@ -99,7 +105,8 @@ interface AppDataContextValue {
   addField: (input: Omit<Field, 'id' | 'openIssues' | 'totalSavings' | 'status' | 'hasBoundary'> & { hasBoundary?: boolean }) => Promise<Field>;
   updateSettings: (patch: Partial<UserSettings>) => Promise<void>;
   updateCostAssumptions: (assumptions: CostAssumptions) => Promise<void>;
-  startScan: (fieldId: string) => Promise<Scan>;
+  startScan: (fieldId: string, capture?: ScanCapture) => Promise<Scan>;
+  uploadScanVideo: (scanId: string, onProgress?: (percent: number) => void) => Promise<Scan | null>;
   advanceScanProgress: (scanId: string, progress: number, status?: Scan['status']) => Promise<Scan | null>;
   completeScan: (scanId: string) => Promise<{ scan: Scan; report: Report } | null>;
   getField: (id: string) => Field | undefined;
@@ -154,17 +161,15 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     loadAppData(user.uid)
       .then(async (local) => {
+        let farmProfile = local.farmProfile;
+        let onboardingComplete = local.onboardingComplete;
+
         if (!local.onboardingComplete || !local.farmProfile) {
           try {
             const remote = await fetchFarmProfile(user.uid);
             if (remote.onboardingComplete && remote.farmProfile) {
-              const merged = {
-                ...local,
-                farmProfile: remote.farmProfile,
-                onboardingComplete: true,
-              };
-              await saveAppData(user.uid, merged);
-              return merged;
+              farmProfile = remote.farmProfile;
+              onboardingComplete = true;
             }
           } catch (error) {
             if (__DEV__) {
@@ -173,16 +178,55 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        // Push locally saved farm profile to Supabase once columns exist
-        if (local.onboardingComplete && local.farmProfile) {
-          saveFarmProfile(user, local.farmProfile, displayName).catch((error) => {
+        let fields = local.fields;
+        let scans = local.scans;
+        let reports = local.reports;
+
+        try {
+          const remoteData = await fetchFieldData(user.uid);
+          const hasRemoteData =
+            remoteData.fields.length > 0 ||
+            remoteData.scans.length > 0 ||
+            remoteData.reports.length > 0;
+
+          if (hasRemoteData) {
+            fields = remoteData.fields;
+            scans = remoteData.scans;
+            reports = remoteData.reports;
+          } else if (local.fields.length > 0) {
+            await migrateLocalFieldData(user, {
+              fields: local.fields,
+              scans: local.scans,
+              reports: local.reports,
+            });
+          }
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[fieldData] fetch field data failed', error);
+          }
+        }
+
+        if (onboardingComplete && farmProfile) {
+          saveFarmProfile(user, farmProfile, displayName).catch((error) => {
             if (__DEV__) {
               console.warn('[profile] background farm profile sync failed', error);
             }
           });
         }
 
-        return local;
+        scans = normalizeScanTimestamps(scans);
+        fields = normalizeFieldTimestamps(fields, scans);
+
+        const merged = {
+          ...local,
+          farmProfile,
+          onboardingComplete,
+          fields: normalizeFieldTimestamps(fields, scans),
+          scans,
+          reports,
+        };
+        await saveAppData(user.uid, merged);
+        return merged;
       })
       .then(setData)
       .finally(() => setLoading(false));
@@ -208,7 +252,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   );
 
   const addField = useCallback(
-    async (input) => {
+    async (
+      input: Omit<Field, 'id' | 'openIssues' | 'totalSavings' | 'status' | 'hasBoundary'> & {
+        hasBoundary?: boolean;
+      },
+    ) => {
       const field: Field = {
         id: createId('field'),
         name: input.name,
@@ -221,11 +269,25 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         totalSavings: 0,
         status: 'unscanned',
       };
+
+      if (user) {
+        try {
+          const saved = await createField(user, field);
+          const next = { ...data, fields: [...data.fields, saved] };
+          await persist(next);
+          return saved;
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[fieldData] create field failed, saving locally', error);
+          }
+        }
+      }
+
       const next = { ...data, fields: [...data.fields, field] };
       await persist(next);
       return field;
     },
-    [data, persist],
+    [data, persist, user],
   );
 
   const updateSettings = useCallback(
@@ -243,23 +305,52 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   );
 
   const startScan = useCallback(
-    async (fieldId: string) => {
+    async (fieldId: string, capture?: ScanCapture) => {
       const isFirstScan = data.scans.filter((s) => s.status === 'completed').length === 0;
+      const recordedAtMs = capture?.recordedAtMs ?? Date.now();
       const scan: Scan = {
         id: createId('scan'),
         fieldId,
-        createdAt: new Date().toISOString(),
+        createdAt: toIsoTimestamp(recordedAtMs),
+        recordedAtMs,
         status: 'uploading',
         progress: 0,
         isFirstScan,
+        videoUri: capture?.videoUri,
+        videoDurationSeconds: capture?.durationSeconds,
+        gpsTrack: capture?.gpsTrack,
       };
+
+      if (user) {
+        try {
+          const saved = await createScan(user.uid, scan);
+          const merged = {
+            ...saved,
+            createdAt: scan.createdAt,
+            recordedAtMs: scan.recordedAtMs,
+            videoUri: scan.videoUri,
+            videoDurationSeconds: scan.videoDurationSeconds,
+            gpsTrack: scan.gpsTrack,
+          };
+          const next = { ...data, scans: [...data.scans, merged] };
+          await persist(next);
+          setSelectedScanId(merged.id);
+          setSelectedFieldId(fieldId);
+          return merged;
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[fieldData] create scan failed, saving locally', error);
+          }
+        }
+      }
+
       const next = { ...data, scans: [...data.scans, scan] };
       await persist(next);
       setSelectedScanId(scan.id);
       setSelectedFieldId(fieldId);
       return scan;
     },
-    [data, persist],
+    [data, persist, user],
   );
 
   const advanceScanProgress = useCallback(
@@ -275,10 +366,82 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         healthScore: progress >= 90 ? 72 + Math.round(Math.random() * 20) : scan.healthScore,
       };
       const scans = data.scans.map((s) => (s.id === scanId ? updated : s));
+
+      if (user) {
+        try {
+          const saved = await updateScan(user.uid, updated);
+          const next = { ...data, scans: data.scans.map((s) => (s.id === scanId ? saved : s)) };
+          await persist(next);
+          return saved;
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[fieldData] update scan failed, saving locally', error);
+          }
+        }
+      }
+
       await persist({ ...data, scans });
       return updated;
     },
-    [data, persist],
+    [data, persist, user],
+  );
+
+  const uploadScanVideo = useCallback(
+    async (scanId: string, onProgress?: (percent: number) => void) => {
+      const scan = data.scans.find((s) => s.id === scanId);
+      if (!scan?.videoUri) return scan ?? null;
+      if (scan.videoUrl) return scan;
+
+      const mapUploadProgress = (uploadPercent: number) => {
+        onProgress?.(uploadPercent);
+      };
+
+      if (!user) {
+        const localOnly: Scan = { ...scan, status: 'processing', progress: 30 };
+        await persist({
+          ...data,
+          scans: data.scans.map((s) => (s.id === scanId ? localOnly : s)),
+        });
+        return localOnly;
+      }
+
+      try {
+        const storagePath = await uploadScanVideoFile(
+          user.uid,
+          scanId,
+          scan.videoUri,
+          mapUploadProgress,
+        );
+
+        const updated: Scan = {
+          ...scan,
+          videoUrl: storagePath,
+          progress: 30,
+          status: 'processing',
+        };
+
+        const saved = await updateScan(user.uid, updated);
+        const merged = {
+          ...updated,
+          ...saved,
+          createdAt: scan.createdAt,
+          recordedAtMs: scan.recordedAtMs,
+          videoUri: scan.videoUri,
+        };
+        const next = {
+          ...data,
+          scans: data.scans.map((s) => (s.id === scanId ? merged : s)),
+        };
+        await persist(next);
+        return merged;
+      } catch (error) {
+        if (__DEV__) {
+          console.warn('[scanUpload] upload failed', error);
+        }
+        throw error;
+      }
+    },
+    [data, persist, user],
   );
 
   const completeScan = useCallback(
@@ -287,10 +450,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       const field = data.fields.find((f) => f.id === scan?.fieldId);
       if (!scan || !field) return null;
 
+      const completedAt = toIsoTimestamp(Date.now());
       const completedScan: Scan = {
         ...scan,
         status: 'completed',
         progress: 100,
+        completedAt,
         weedCoverage: scan.weedCoverage ?? 18,
         stressCoverage: scan.stressCoverage ?? 8,
         healthScore: scan.healthScore ?? 82,
@@ -301,7 +466,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         healthScore: report.healthScore,
         openIssues: report.findingsCount,
         totalSavings: report.estimatedSavings,
-        lastScanDate: formatScanDate(completedScan.createdAt),
+        lastScanDate: toIsoTimestamp(getScanRecordedAtMs(completedScan)),
         status: report.severity,
       };
       const next = {
@@ -310,11 +475,22 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         reports: [...data.reports, report],
         fields: data.fields.map((f) => (f.id === field.id ? updatedField : f)),
       };
+
+      if (user) {
+        try {
+          await completeScanRemote(user.uid, completedScan, report, updatedField);
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[fieldData] complete scan failed, saving locally', error);
+          }
+        }
+      }
+
       await persist(next);
       setSelectedReportId(report.id);
       return { scan: completedScan, report };
     },
-    [data, persist],
+    [data, persist, user],
   );
 
   const getField = useCallback((id: string) => data.fields.find((f) => f.id === id), [data.fields]);
@@ -379,6 +555,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       updateSettings,
       updateCostAssumptions,
       startScan,
+      uploadScanVideo,
       advanceScanProgress,
       completeScan,
       getField,
@@ -402,6 +579,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       updateSettings,
       updateCostAssumptions,
       startScan,
+      uploadScanVideo,
       advanceScanProgress,
       completeScan,
       getField,

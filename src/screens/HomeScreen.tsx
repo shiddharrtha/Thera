@@ -13,6 +13,7 @@ import { HealthBar } from '../components/HealthBar';
 import { EmptyState } from '../components/EmptyState';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
+import { formatOptionalDisplayDateTime } from '../utils/timestamps';
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -129,7 +130,7 @@ export function HomeScreen({ onNavigate }: ScreenProps) {
                     <View>
                       <Text style={styles.fieldName}>{f.name}</Text>
                       <Text style={styles.fieldMeta}>
-                        {f.acreage} acres · Last scan: {f.lastScanDate ?? 'No scans yet'}
+                        {f.acreage} acres · Last scan: {formatOptionalDisplayDateTime(f.lastScanDate)}
                       </Text>
                     </View>
                     <View style={styles.healthScore}>

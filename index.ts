@@ -1,7 +1,7 @@
 // @react-native-firebase uses setImmediate on web; polyfill for browsers.
 if (typeof globalThis.setImmediate === 'undefined') {
-  globalThis.setImmediate = (callback, ...args) =>
-    setTimeout(callback, 0, ...args) as unknown as NodeJS.Immediate;
+  globalThis.setImmediate = ((callback: (...args: unknown[]) => void, ...args: unknown[]) =>
+    setTimeout(() => callback(...args), 0)) as unknown as typeof globalThis.setImmediate;
 }
 
 import { registerRootComponent } from 'expo';

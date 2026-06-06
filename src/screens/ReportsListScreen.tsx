@@ -7,6 +7,7 @@ import { EmptyState } from '../components/EmptyState';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 import type { FieldStatus } from '../types/models';
+import { formatFromEpochMs, parseApiTimestamp } from '../utils/timestamps';
 
 const STATUS_CONFIG: Record<FieldStatus, { label: string; bg: string; text: string }> = {
   unscanned: { label: 'Not Scanned', bg: colors.gray100, text: colors.gray600 },
@@ -18,7 +19,7 @@ const STATUS_CONFIG: Record<FieldStatus, { label: string; bg: string; text: stri
 export function ReportsListScreen({ onNavigate }: ScreenProps) {
   const { data, getField, setSelectedReportId } = useAppData();
   const reports = [...data.reports].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    (a, b) => parseApiTimestamp(b.createdAt) - parseApiTimestamp(a.createdAt),
   );
 
   if (reports.length === 0) {
@@ -66,13 +67,7 @@ export function ReportsListScreen({ onNavigate }: ScreenProps) {
                     <Text style={[styles.badgeText, { color: st.text }]}>{st.label}</Text>
                   </View>
                 </View>
-                <Text style={styles.date}>
-                  {new Date(report.createdAt).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  })}
-                </Text>
+                <Text style={styles.date}>{formatFromEpochMs(parseApiTimestamp(report.createdAt))}</Text>
                 <View style={styles.statsRow}>
                   <Text style={styles.stat}>{report.findingsCount} findings</Text>
                   <Text style={styles.savings}>${report.estimatedSavings} saved</Text>

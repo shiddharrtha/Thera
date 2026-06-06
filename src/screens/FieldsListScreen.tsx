@@ -14,6 +14,7 @@ import { useAppData } from '../context/AppDataContext';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 import type { Field, FieldStatus } from '../types/models';
+import { formatOptionalDisplayDateTime } from '../utils/timestamps';
 
 const STATUS_CONFIG: Record<FieldStatus, { label: string; bg: string; text: string }> = {
   unscanned: { label: 'Not Scanned', bg: colors.gray100, text: colors.gray600 },
@@ -160,7 +161,7 @@ function FieldCard({
               </View>
             </View>
             <View style={styles.fieldStats}>
-              <Text style={styles.fieldStat}>Last scan: {field.lastScanDate ?? 'No scans yet'}</Text>
+              <Text style={styles.fieldStat}>Last scan: {formatOptionalDisplayDateTime(field.lastScanDate)}</Text>
               {field.openIssues > 0 && (
                 <View style={styles.issuesRow}>
                   <Ionicons name="warning" size={10} color={colors.warning} />

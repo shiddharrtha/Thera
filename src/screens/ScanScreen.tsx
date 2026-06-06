@@ -1,9 +1,18 @@
-import { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  StyleSheet,
+  ActivityIndicator,
+} from 'react-native';
+import { CameraView } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
 import { useAppData } from '../context/AppDataContext';
+import { useFieldScanner } from '../hooks/useFieldScanner';
 import { EmptyState } from '../components/EmptyState';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
@@ -16,24 +25,57 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
     selectedFieldId ?? (fields.length === 1 ? fields[0]?.id ?? null : null),
   );
   const [confirmed, setConfirmed] = useState(fields.length === 1);
-  const [recording, setRecording] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const [seconds, setSeconds] = useState(0);
   const [showTutorial, setShowTutorial] = useState(!hasCompletedScans);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [openingCamera, setOpeningCamera] = useState(false);
+  const [savingScan, setSavingScan] = useState(false);
+  const [cameraMountError, setCameraMountError] = useState<string | null>(null);
+
+  const {
+    cameraRef,
+    cameraReady,
+    markCameraReady,
+    permissionsGranted,
+    permissionsLoading,
+    requestPermissions,
+    isRecording,
+    isStarting,
+    isPaused,
+    seconds,
+    gpsQuality,
+    error: scannerError,
+    startRecording,
+    pauseRecording,
+    stopRecording,
+    resetScanner,
+  } = useFieldScanner();
 
   const activeField = activeFieldId ? fields.find((f) => f.id === activeFieldId) : undefined;
 
-  useEffect(() => {
-    if (recording && !paused) {
-      timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
-    } else if (timerRef.current) {
-      clearInterval(timerRef.current);
+  const handleOpenCamera = async () => {
+    setOpeningCamera(true);
+    try {
+      const ok = await requestPermissions();
+      if (ok) setConfirmed(true);
+    } finally {
+      setOpeningCamera(false);
     }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [recording, paused]);
+  };
+
+  const handleStop = async () => {
+    if (!activeFieldId || savingScan) return;
+
+    setSavingScan(true);
+    try {
+      const capture = await stopRecording();
+      if (!capture) return;
+
+      await startScan(activeFieldId, capture);
+      setSelectedFieldId(activeFieldId);
+      onNavigate('processing');
+    } finally {
+      setSavingScan(false);
+    }
+  };
 
   if (fields.length === 0) {
     return (
@@ -114,11 +156,44 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
               ))}
             </View>
           )}
-          <TouchableOpacity onPress={() => setConfirmed(true)}>
+          {scannerError && <Text style={styles.errorText}>{scannerError}</Text>}
+          <TouchableOpacity onPress={handleOpenCamera} disabled={openingCamera}>
             <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.confirmBtn}>
-              <Ionicons name="camera" size={18} color={colors.white} />
-              <Text style={styles.confirmBtnText}>Open Camera</Text>
+              {openingCamera ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <>
+                  <Ionicons name="camera" size={18} color={colors.white} />
+                  <Text style={styles.confirmBtnText}>Open Camera</Text>
+                </>
+              )}
             </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  if (permissionsLoading || !permissionsGranted) {
+    return (
+      <View style={styles.selectorContainer}>
+        <View style={styles.confirmBody}>
+          <Text style={styles.confirmName}>Camera access needed</Text>
+          <Text style={styles.confirmMeta}>
+            Thera needs camera, microphone, and location permissions to record field scans.
+          </Text>
+          {scannerError && <Text style={styles.errorText}>{scannerError}</Text>}
+          <TouchableOpacity onPress={handleOpenCamera} disabled={openingCamera}>
+            <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.confirmBtn}>
+              {openingCamera ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.confirmBtnText}>Grant Permissions</Text>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setConfirmed(false)}>
+            <Text style={styles.linkText}>Go back</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -129,59 +204,107 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
   const currentRow = Math.min(5, Math.floor(seconds / 12) + 1);
 
   const indicators = [
-    { label: 'GPS', value: 'Good', ok: true, icon: 'location' as const },
-    { label: 'Lighting', value: 'Good', ok: true, icon: 'sunny' as const },
-    { label: 'Crop Rows', value: recording ? 'Visible' : 'Ready', ok: true, icon: 'menu' as const },
+    {
+      label: 'GPS',
+      value:
+        gpsQuality === 'good'
+          ? 'Good'
+          : gpsQuality === 'weak'
+            ? 'Weak'
+            : gpsQuality === 'denied'
+              ? 'Off'
+              : 'Acquiring',
+      ok: gpsQuality === 'good' || gpsQuality === 'weak',
+      icon: 'location' as const,
+    },
+    {
+      label: 'Camera',
+      value: cameraReady ? 'Ready' : 'Starting',
+      ok: cameraReady,
+      icon: 'camera' as const,
+    },
+    {
+      label: 'Crop Rows',
+      value: isRecording ? 'Visible' : 'Ready',
+      ok: true,
+      icon: 'menu' as const,
+    },
   ];
-
-  const handleStop = async () => {
-    if (!activeFieldId) return;
-    const scan = await startScan(activeFieldId);
-    setSelectedFieldId(activeFieldId);
-    onNavigate('processing');
-    void scan;
-  };
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={['#040C06', '#081A0C', '#0D2510', '#0A1C0D', '#050D07']}
+      <CameraView
+        ref={cameraRef}
         style={StyleSheet.absoluteFill}
+        facing="back"
+        mode="video"
+        active
+        onCameraReady={markCameraReady}
+        onMountError={({ message }) => {
+          setCameraMountError(message);
+          if (__DEV__) console.warn('[scan] camera mount error', message);
+        }}
       />
+
+      <LinearGradient
+        colors={['rgba(4,12,6,0.72)', 'transparent', 'rgba(5,13,7,0.85)']}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
+
       {Array.from({ length: 14 }).map((_, i) => (
         <View
           key={i}
+          pointerEvents="none"
           style={[
             styles.rowLine,
             {
               left: `${((i + 0.5) / 14) * 100}%`,
               width: i % 2 === 0 ? 2 : 1,
-              opacity: i % 2 === 0 ? 0.1 : 0.05,
+              opacity: i % 2 === 0 ? 0.18 : 0.08,
             },
           ]}
         />
       ))}
 
+      {isRecording && (
+        <View style={styles.recordingBanner} pointerEvents="none">
+          <View style={styles.recordingDot} />
+          <Text style={styles.recordingBannerText}>
+            {String(Math.floor(seconds / 60)).padStart(2, '0')}:
+            {String(seconds % 60).padStart(2, '0')} · {isPaused ? 'PAUSED' : 'RECORDING'}
+          </Text>
+        </View>
+      )}
+
       <View style={styles.header}>
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backBtnLight} onPress={onBack}>
+          <TouchableOpacity
+            style={styles.backBtnLight}
+            onPress={() => {
+              if (isRecording) return;
+              resetScanner();
+              setConfirmed(false);
+            }}
+            disabled={isRecording || savingScan}
+          >
             <Ionicons name="chevron-back" size={18} color={colors.white} />
           </TouchableOpacity>
           <View style={styles.headerText}>
             <Text style={styles.title}>Scan {activeField?.name ?? 'Field'}</Text>
-            {recording && (
+            {isRecording && (
               <View style={styles.recordingRow}>
                 <View style={styles.recordingDot} />
                 <Text style={styles.recordingText}>
                   {String(Math.floor(seconds / 60)).padStart(2, '0')}:
-                  {String(seconds % 60).padStart(2, '0')} RECORDING
+                  {String(seconds % 60).padStart(2, '0')} {isPaused ? 'PAUSED' : 'RECORDING'}
                 </Text>
               </View>
             )}
           </View>
         </View>
 
-        {!recording && (
+        {!isRecording && (
           <View style={styles.instructions}>
             {['Walk slowly between rows', 'Keep camera 2–3 feet above crop', 'Move in a straight line'].map((t) => (
               <View key={t} style={styles.instructionRow}>
@@ -207,7 +330,7 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
         </View>
       </View>
 
-      {recording && (
+      {isRecording && (
         <View style={styles.progressCard}>
           <View style={styles.progressHeader}>
             <Text style={styles.progressTitle}>Row {currentRow} of 5</Text>
@@ -222,34 +345,55 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
       <View style={styles.spacer} />
 
       <View style={styles.controls}>
+        {scannerError && <Text style={styles.errorBanner}>{scannerError}</Text>}
+        {cameraMountError && !scannerError && (
+          <Text style={styles.errorBanner}>Camera error: {cameraMountError}</Text>
+        )}
         <Text style={styles.hint}>
-          {recording
-            ? paused
-              ? 'Paused — tap to resume'
-              : 'Keep going · Walk slowly'
-            : 'Tap the button to start scanning'}
+          {savingScan
+            ? 'Saving scan video...'
+            : isStarting
+              ? 'Starting recording...'
+              : !cameraReady
+                ? 'Starting camera...'
+                : isRecording
+                  ? isPaused
+                    ? 'Paused — tap to resume'
+                    : 'Keep going · Walk slowly'
+                  : 'Tap the button to start scanning'}
         </Text>
         <View style={styles.controlRow}>
-          {recording && (
-            <TouchableOpacity style={styles.sideBtn} onPress={() => setPaused((p) => !p)}>
-              <Ionicons name="pause" size={20} color={colors.white} />
+          {isRecording && (
+            <TouchableOpacity style={styles.sideBtn} onPress={pauseRecording} disabled={savingScan}>
+              <Ionicons name={isPaused ? 'play' : 'pause'} size={20} color={colors.white} />
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            style={[styles.mainBtn, { backgroundColor: recording ? colors.destructive : colors.success }]}
-            onPress={() => {
-              if (recording) handleStop();
-              else {
-                setRecording(true);
-                setPaused(false);
-                setShowTutorial(false);
+            style={[
+              styles.mainBtn,
+              {
+                backgroundColor: isRecording ? colors.destructive : colors.success,
+                opacity: savingScan || isStarting ? 0.7 : 1,
+              },
+            ]}
+            disabled={savingScan || isStarting}
+            onPress={async () => {
+              if (isRecording) {
+                await handleStop();
+                return;
               }
+              setShowTutorial(false);
+              await startRecording();
             }}
           >
-            <Ionicons name={recording ? 'stop' : 'play'} size={28} color={colors.white} />
+            {savingScan || isStarting ? (
+              <ActivityIndicator color={colors.white} />
+            ) : (
+              <Ionicons name={isRecording ? 'stop' : 'play'} size={28} color={colors.white} />
+            )}
           </TouchableOpacity>
-          {!recording && (
-            <TouchableOpacity style={styles.sideBtn}>
+          {!isRecording && (
+            <TouchableOpacity style={styles.sideBtn} disabled={savingScan}>
               <Ionicons name="location" size={20} color={colors.white} />
             </TouchableOpacity>
           )}
@@ -305,11 +449,28 @@ const styles = createStyles({
     gap: 8,
     paddingVertical: 16,
     borderRadius: 14,
+    minHeight: 52,
   },
   confirmBtnText: { color: colors.white, fontWeight: '700', fontSize: 15 },
+  errorText: { color: colors.destructive, fontSize: 13 },
+  linkText: { textAlign: 'center', color: colors.primary, fontWeight: '600', fontSize: 14 },
   backBtnLight: { padding: 8, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.12)' },
   backBtnDark: { padding: 6, borderRadius: 12, backgroundColor: colors.background },
   rowLine: { position: 'absolute', top: 0, bottom: 0, backgroundColor: '#4ADE80' },
+  recordingBanner: {
+    position: 'absolute',
+    top: 56,
+    alignSelf: 'center',
+    zIndex: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(220,38,38,0.92)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  recordingBannerText: { color: colors.white, fontSize: 13, fontWeight: '800' },
   header: { paddingHorizontal: 20, paddingTop: 12, zIndex: 10 },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
   headerText: { flex: 1 },
@@ -350,6 +511,12 @@ const styles = createStyles({
   spacer: { flex: 1 },
   controls: { paddingHorizontal: 20, paddingBottom: 32, zIndex: 10 },
   hint: { textAlign: 'center', color: 'rgba(255,255,255,0.5)', fontSize: 12, marginBottom: 24 },
+  errorBanner: {
+    textAlign: 'center',
+    color: '#FCA5A5',
+    fontSize: 12,
+    marginBottom: 12,
+  },
   controlRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 40 },
   sideBtn: {
     width: 48,

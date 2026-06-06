@@ -6,6 +6,7 @@ import { useAppData } from '../context/AppDataContext';
 import { EmptyState } from '../components/EmptyState';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
+import { formatScanTimestamp, formatDateFromEpochMs, getScanRecordedAtMs } from '../utils/timestamps';
 
 type ChartPoint = { date: string; weed: number; stress: number; spray: number };
 
@@ -91,7 +92,7 @@ export function TimelineScreen({ onBack, onNavigate }: ScreenProps) {
 
   const isBaseline = scans.length === 1;
   const chartData: ChartPoint[] = scans.map((s) => ({
-    date: new Date(s.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    date: formatDateFromEpochMs(getScanRecordedAtMs(s)),
     weed: s.weedCoverage ?? 0,
     stress: s.stressCoverage ?? 0,
     spray: s.weedCoverage ? Math.round(s.weedCoverage * 1.2) : 0,
@@ -143,7 +144,7 @@ export function TimelineScreen({ onBack, onNavigate }: ScreenProps) {
               </View>
               <View style={styles.eventContent}>
                 <Text style={styles.eventDate}>
-                  {new Date(scan.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  {formatScanTimestamp(scan)}
                 </Text>
                 <Text style={styles.eventLabel}>
                   {i === scans.length - 1

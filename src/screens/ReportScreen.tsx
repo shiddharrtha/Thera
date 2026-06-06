@@ -3,6 +3,8 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Rect, Polygon, Polyline, Text as SvgText } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
+import { useAppData } from '../context/AppDataContext';
+import { formatScanTimestamp, formatOptionalDisplayDateTime } from '../utils/timestamps';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 import { fonts } from '../theme/typography';
@@ -74,6 +76,12 @@ const FINDINGS = [
 ];
 
 export function ReportScreen({ onNavigate, onBack }: ScreenProps) {
+  const { selectedReportId, getReport, getField, getScan } = useAppData();
+  const report = selectedReportId ? getReport(selectedReportId) : undefined;
+  const field = report ? getField(report.fieldId) : undefined;
+  const scan = report ? getScan(report.scanId) : undefined;
+  const scanTimestamp = scan ? formatScanTimestamp(scan) : report ? formatOptionalDisplayDateTime(report.createdAt) : null;
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -82,8 +90,10 @@ export function ReportScreen({ onNavigate, onBack }: ScreenProps) {
             <Ionicons name="chevron-back" size={18} color={colors.gray700} />
           </TouchableOpacity>
           <View>
-            <Text style={styles.title}>North Soybean Field</Text>
-            <Text style={styles.subtitle}>Scan Date: May 25, 2026</Text>
+            <Text style={styles.title}>{field?.name ?? 'Field Report'}</Text>
+            <Text style={styles.subtitle}>
+              {scanTimestamp ? `Scan: ${scanTimestamp}` : 'Scan date unavailable'}
+            </Text>
           </View>
         </View>
         <View style={styles.statusBadge}>

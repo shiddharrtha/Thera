@@ -8,6 +8,7 @@ import { useAppData } from '../context/AppDataContext';
 import { EmptyState } from '../components/EmptyState';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
+import { formatOptionalDisplayDateTime, formatFromEpochMs, parseApiTimestamp } from '../utils/timestamps';
 
 type Tab = 'overview' | 'map' | 'timeline' | 'reports';
 
@@ -84,7 +85,7 @@ export function FieldDetailScreen({ onNavigate, onBack }: ScreenProps) {
                 </View>
               )}
               <View style={styles.summaryMetrics}>
-                <Metric label="Last scanned" value={field.lastScanDate ?? 'No scans yet'} />
+                <Metric label="Last scanned" value={formatOptionalDisplayDateTime(field.lastScanDate)} />
                 <Metric label="Weed pressure" value={hasScan ? 'Medium' : '—'} />
                 <Metric label="Crop stress" value={hasScan ? 'Low' : '—'} />
                 <Metric label="Open issues" value={String(field.openIssues)} />
@@ -168,7 +169,7 @@ export function FieldDetailScreen({ onNavigate, onBack }: ScreenProps) {
                 }}
               >
                 <View>
-                  <Text style={styles.reportDate}>{new Date(r.createdAt).toLocaleDateString()}</Text>
+                  <Text style={styles.reportDate}>{formatFromEpochMs(parseApiTimestamp(r.createdAt))}</Text>
                   <Text style={styles.reportSummary} numberOfLines={2}>{r.summary}</Text>
                 </View>
                 <View style={styles.reportMeta}>
