@@ -164,8 +164,11 @@ function IssueCard({ issue }: { issue: DetectedIssue }) {
 }
 
 export function ReportScreen({ onNavigate, onBack }: ScreenProps) {
-  const { selectedReportId, getReport, getField, getScan, getScansForField } = useAppData();
-  const report = selectedReportId ? getReport(selectedReportId) : undefined;
+  const { selectedReportId, selectedScanId, data, getReport, getField, getScan, getScansForField } = useAppData();
+
+  const report =
+    (selectedReportId ? getReport(selectedReportId) : undefined) ??
+    (selectedScanId ? data.reports.find((item) => item.scanId === selectedScanId) : undefined);
   const field = report ? getField(report.fieldId) : undefined;
   const scan = report ? getScan(report.scanId) : undefined;
   const scanTimestamp = scan ? formatScanTimestamp(scan) : report ? formatOptionalDisplayDateTime(report.createdAt) : null;

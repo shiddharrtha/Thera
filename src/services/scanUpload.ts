@@ -1,6 +1,7 @@
-import { File } from 'expo-file-system';
 import { firebaseAuth } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
+import { createAbortError } from '../utils/abortError';
+import { readVideoBlob } from '../utils/readVideoBlob';
 
 export const SCAN_VIDEOS_BUCKET = 'scan-videos';
 const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
@@ -13,7 +14,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string, signal?:
   return new Promise((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(timer);
-      reject(new DOMException('Scan cancelled.', 'AbortError'));
+      reject(createAbortError());
     };
 
     const timer = setTimeout(() => {
@@ -24,7 +25,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string, signal?:
     if (signal) {
       if (signal.aborted) {
         clearTimeout(timer);
-        reject(new DOMException('Scan cancelled.', 'AbortError'));
+        reject(createAbortError());
         return;
       }
       signal.addEventListener('abort', onAbort);
@@ -47,14 +48,16 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string, signal?:
 
 function assertNotAborted(signal?: AbortSignal) {
   if (signal?.aborted) {
-    throw new DOMException('Scan cancelled.', 'AbortError');
+    throw createAbortError();
   }
 }
 
-async function refreshFirebaseToken(force = true) {
+async function getFreshFirebaseToken(): Promise<string> {
   const user = firebaseAuth().currentUser;
-  if (!user) return null;
-  return user.getIdToken(force);
+  if (!user) {
+    throw new Error('Sign in to upload scan videos.');
+  }
+  return user.getIdToken(true);
 }
 
 export function getScanVideoStoragePath(userId: string, scanId: string) {
@@ -79,8 +82,8 @@ export function getScanVideoErrorMessage(error: unknown): string {
     return 'Scan video storage is not set up. Run: npm run db:migrate-scan-video';
   }
 
-  if (code === '42501') {
-    return 'Storage permissions blocked the upload. Run supabase/add-scan-video-storage.sql';
+  if (code === '42501' || /row-level security|permission denied|403/i.test(message)) {
+    return 'Storage permissions blocked the upload. Enable Firebase auth in Supabase and run db:migrate-scan-video.';
   }
 
   if (/timed out/i.test(message)) {
@@ -90,26 +93,61 @@ export function getScanVideoErrorMessage(error: unknown): string {
   return message;
 }
 
-async function readVideoPayload(localUri: string): Promise<ArrayBuffer | Blob> {
-  const file = new File(localUri);
-  if (!file.exists) {
-    throw new Error('Scan video file was not found on this device.');
+function getSupabaseConfig() {
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
+  const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('Supabase is not configured in .env');
   }
+  return { supabaseUrl: supabaseUrl.replace(/\/+$/, ''), anonKey };
+}
 
+/** Direct Storage REST upload — more reliable on React Native than the JS client. */
+async function uploadViaStorageRest(
+  storagePath: string,
+  blob: Blob,
+  token: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const { supabaseUrl, anonKey } = getSupabaseConfig();
+  const encodedPath = storagePath.split('/').map(encodeURIComponent).join('/');
+  const url = `${supabaseUrl}/storage/v1/object/${SCAN_VIDEOS_BUCKET}/${encodedPath}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: anonKey,
+      'Content-Type': 'video/mp4',
+      'x-upsert': 'true',
+    },
+    body: blob,
+    signal,
+  });
+
+  if (response.ok) return;
+
+  let detail = `Upload failed (${response.status})`;
   try {
-    const response = await fetch(localUri);
-    if (response.ok) {
-      const blob = await response.blob();
-      if (blob.size > 0) return blob;
-    }
-  } catch (error) {
-    if (__DEV__) {
-      console.warn('[scanUpload] fetch(localUri) failed, falling back to bytes()', error);
-    }
+    const body = (await response.json()) as { message?: string; error?: string };
+    detail = body.message ?? body.error ?? detail;
+  } catch {
+    // ignore parse errors
   }
 
-  const bytes = await file.bytes();
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const error = new Error(detail) as Error & { statusCode?: string };
+  error.statusCode = String(response.status);
+  throw error;
+}
+
+async function uploadViaSupabaseClient(storagePath: string, blob: Blob): Promise<void> {
+  const { error } = await supabase.storage.from(SCAN_VIDEOS_BUCKET).upload(storagePath, blob, {
+    contentType: 'video/mp4',
+    upsert: true,
+    cacheControl: '3600',
+  });
+
+  if (error) throw error;
 }
 
 /** Upload a local scan video to Supabase Storage. Returns the object path in the bucket. */
@@ -124,12 +162,11 @@ export async function uploadScanVideoFile(
 
   assertNotAborted(signal);
   onProgress?.(5);
-  await refreshFirebaseToken(true);
 
   assertNotAborted(signal);
   onProgress?.(10);
-  const payload = await withTimeout(
-    readVideoPayload(localUri),
+  const blob = await withTimeout(
+    readVideoBlob(localUri),
     UPLOAD_TIMEOUT_MS,
     'Reading scan video',
     signal,
@@ -142,31 +179,40 @@ export async function uploadScanVideoFile(
   for (const delay of delays) {
     assertNotAborted(signal);
     if (delay > 0) await sleep(delay);
-    await refreshFirebaseToken(true);
 
     try {
       onProgress?.(55);
-      const { error } = await withTimeout(
-        supabase.storage
-          .from(SCAN_VIDEOS_BUCKET)
-          .upload(storagePath, payload, {
-            contentType: 'video/mp4',
-            upsert: true,
-            cacheControl: '3600',
-          }),
+      const token = await getFreshFirebaseToken();
+
+      await withTimeout(
+        uploadViaStorageRest(storagePath, blob, token, signal),
         UPLOAD_TIMEOUT_MS,
         'Uploading scan video',
         signal,
       );
 
-      if (error) throw error;
-
       onProgress?.(100);
       return storagePath;
-    } catch (error) {
-      lastError = error;
+    } catch (restError) {
       if (__DEV__) {
-        console.warn('[scanUpload] upload attempt failed', error);
+        console.warn('[scanUpload] REST upload failed, trying supabase client', restError);
+      }
+
+      try {
+        await getFreshFirebaseToken();
+        await withTimeout(
+          uploadViaSupabaseClient(storagePath, blob),
+          UPLOAD_TIMEOUT_MS,
+          'Uploading scan video',
+          signal,
+        );
+        onProgress?.(100);
+        return storagePath;
+      } catch (clientError) {
+        lastError = clientError;
+        if (__DEV__) {
+          console.warn('[scanUpload] client upload attempt failed', clientError);
+        }
       }
     }
   }
@@ -176,7 +222,7 @@ export async function uploadScanVideoFile(
 
 /** Get a short-lived signed URL for playback (1 hour). */
 export async function getScanVideoSignedUrl(storagePath: string) {
-  await refreshFirebaseToken(true);
+  await getFreshFirebaseToken();
   const { data, error } = await supabase.storage
     .from(SCAN_VIDEOS_BUCKET)
     .createSignedUrl(storagePath, 3600);

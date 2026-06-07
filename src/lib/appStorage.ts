@@ -81,9 +81,10 @@ export async function loadAppData(userId: string): Promise<AppDataState> {
 }
 
 export async function saveAppData(userId: string, data: AppDataState) {
+  if (!data) return;
   await AsyncStorage.setItem(
     storageKey(userId),
-    JSON.stringify({ ...data, scans: completedScansOnly(data.scans) }),
+    JSON.stringify({ ...data, scans: completedScansOnly(data.scans ?? []) }),
   );
 }
 

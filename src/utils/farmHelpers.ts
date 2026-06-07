@@ -22,9 +22,16 @@ export function farmToProfile(farm: Farm): FarmProfile {
   };
 }
 
+/** Fields without a farm_id still belong to the active farm until assigned elsewhere. */
+export function fieldBelongsToFarm(field: Field, farmId: string | null | undefined): boolean {
+  if (!farmId) return true;
+  if (!field.farmId) return true;
+  return field.farmId === farmId;
+}
+
 export function getFieldsForFarm(fields: Field[], farmId: string | null | undefined): Field[] {
-  if (!farmId) return [];
-  return fields.filter((field) => field.farmId === farmId);
+  if (!farmId) return fields;
+  return fields.filter((field) => fieldBelongsToFarm(field, farmId));
 }
 
 export function getFieldIdsForFarm(fields: Field[], farmId: string | null | undefined): Set<string> {
@@ -62,4 +69,9 @@ export function getSelectedFarm(farms: Farm[], selectedFarmId: string | null | u
 
 export function assignFieldsToFarm(fields: Field[], farmId: string): Field[] {
   return fields.map((field) => (field.farmId ? field : { ...field, farmId }));
+}
+
+export function ensureFieldFarmId(field: Field, farmId: string | null | undefined): Field {
+  if (!farmId || field.farmId) return field;
+  return { ...field, farmId };
 }

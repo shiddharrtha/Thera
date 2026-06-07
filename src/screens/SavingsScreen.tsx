@@ -11,7 +11,6 @@ export function SavingsScreen({ onNavigate }: ScreenProps) {
   const { data, getSavingsSummary, hasCompletedScans, getSelectedFarm } = useAppData();
   const savings = getSavingsSummary();
   const selectedFarm = getSelectedFarm();
-  const hasData = hasCompletedScans && savings.totalSavings > 0;
 
   if (!hasCompletedScans) {
     return (
@@ -92,7 +91,7 @@ export function SavingsScreen({ onNavigate }: ScreenProps) {
           </View>
         )}
 
-        {hasData && (
+        {hasCompletedScans && (
           <View style={styles.card}>
             <Text style={styles.cardLabel}>SPRAY AREA COMPARISON</Text>
             <Text style={styles.cardSub}>

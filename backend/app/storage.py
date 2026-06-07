@@ -8,6 +8,30 @@ import httpx
 from app.config import settings
 
 
+async def upload_scan_video(user_id: str, scan_id: str, file_path: Path) -> str:
+    """Upload a scan video to Supabase Storage using the service role key."""
+    storage_path = f"{user_id}/{scan_id}.mp4"
+    storage_url = (
+        f"{settings.supabase_url.rstrip('/')}/storage/v1/object/"
+        f"{settings.scan_videos_bucket}/{storage_path}"
+    )
+    headers = {
+        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        "apikey": settings.supabase_service_role_key,
+        "Content-Type": "video/mp4",
+        "x-upsert": "true",
+    }
+
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        response = await client.post(storage_url, headers=headers, content=file_path.read_bytes())
+        if response.status_code not in (200, 201):
+            raise RuntimeError(
+                f"Could not upload scan video ({response.status_code}): {response.text[:200]}"
+            )
+
+    return storage_path
+
+
 async def download_scan_video(
     *,
     video_path: str | None,

@@ -7,6 +7,7 @@ import { useAppData } from '../context/AppDataContext';
 import { getScanVideoErrorMessage } from '../services/scanUpload';
 import { getScanAnalysisErrorMessage, isScanCancelledError } from '../services/scanAnalysis';
 import type { ScanAnalysisResult } from '../services/scanAnalysis';
+import type { Scan } from '../types/models';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
@@ -25,6 +26,18 @@ const ANALYSIS_PROGRESS_MAX = 99;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForScan(
+  getScan: (id: string) => Scan | undefined,
+  scanId: string,
+): Promise<Scan> {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const found = getScan(scanId);
+    if (found) return found;
+    await sleep(50);
+  }
+  throw new Error('Scan data not found. Go back and try again.');
 }
 
 function mapAnalysisProgressToStep(analysisPercent: number): number {
@@ -51,6 +64,7 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
     completeScan,
     discardScan,
     isAnalysisApiConfigured,
+    setSelectedReportId,
   } = useAppData();
   const scan = selectedScanId ? getScan(selectedScanId) : undefined;
   const isFirstScan = scan?.isFirstScan ?? false;
@@ -61,8 +75,9 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
   const [scanLine, setScanLine] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [completionError, setCompletionError] = useState<string | null>(null);
+  const [completedReportId, setCompletedReportId] = useState<string | null>(null);
   const [overallProgress, setOverallProgress] = useState(0);
-  const pipelineScanIdRef = useRef<string | null>(null);
   const cancelledRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const getScanRef = useRef(getScan);
@@ -87,20 +102,27 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
     setCancelling(true);
 
     const scanId = selectedScanId;
-    if (scanId) {
-      await discardScanRef.current(scanId);
+    try {
+      if (scanId) {
+        await discardScanRef.current(scanId);
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.warn('[processing] discard on cancel failed', error);
+      }
     }
 
     onBack();
   }, [cancelling, done, onBack, selectedScanId]);
 
   useEffect(() => {
-    if (!selectedScanId || pipelineScanIdRef.current === selectedScanId) return;
-    pipelineScanIdRef.current = selectedScanId;
+    if (!selectedScanId) return;
 
+    const runScanId = selectedScanId;
     cancelledRef.current = false;
-    abortControllerRef.current = new AbortController();
-    const signal = abortControllerRef.current.signal;
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    const signal = abortController.signal;
 
     async function runMockAnalysis(scanId: string) {
       for (let step = 1; step < STEPS.length; step++) {
@@ -118,18 +140,28 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
     }
 
     async function runPipeline() {
-      const scanId = selectedScanId!;
-      const initialScan = getScanRef.current(scanId);
-      if (!initialScan) return;
+      const scanId = runScanId;
 
+      try {
       setCurrentStep(0);
       setUploadError(null);
       setAnalysisError(null);
+      setCompletionError(null);
+      setCompletedReportId(null);
       setDone(false);
       setCancelling(false);
       setOverallProgress(0);
 
-      if (initialScan.videoUri && !initialScan.videoUrl) {
+      let initialScan;
+      try {
+        initialScan = await waitForScan(getScanRef.current, scanId);
+      } catch (error) {
+        if (cancelledRef.current || signal.aborted) return;
+        setAnalysisError(error instanceof Error ? error.message : 'Scan data not found.');
+        return;
+      }
+
+      if (initialScan.videoUri && !initialScan.videoUrl && !isAnalysisApiConfigured) {
         try {
           await uploadScanVideoRef.current(scanId, (uploadPercent) => {
             if (cancelledRef.current || signal.aborted) return;
@@ -154,18 +186,30 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
 
       if (isAnalysisApiConfigured) {
         try {
+          setOverallProgress(Math.max(UPLOAD_PROGRESS_MAX, 32));
           const result = await analyzeScanRef.current(scanId, (analysisPercent) => {
             if (cancelledRef.current || signal.aborted) return;
             setCurrentStep(mapAnalysisProgressToStep(analysisPercent));
             const overall = mapAnalysisPercentToOverall(analysisPercent);
             setOverallProgress(overall);
           }, signal);
-          analysisResult = result?.analysis;
+          if (!result) {
+            throw new Error('Could not load scan data for analysis. Go back and try again.');
+          }
+          analysisResult = result.analysis;
         } catch (error) {
           if (cancelledRef.current || signal.aborted || isScanCancelledError(error)) return;
-          setAnalysisError(getScanAnalysisErrorMessage(error));
-          await discardScanRef.current(scanId);
-          return;
+          const message = getScanAnalysisErrorMessage(error);
+          const serverUnreachable = /Could not reach|Network request failed|timed out/i.test(message);
+          if (serverUnreachable) {
+            setUploadError(
+              'Analysis server unreachable — generating an estimated report from your scan.',
+            );
+            await runMockAnalysis(scanId);
+          } else {
+            setAnalysisError(message);
+            return;
+          }
         }
       } else {
         await runMockAnalysis(scanId);
@@ -174,17 +218,35 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
       if (cancelledRef.current || signal.aborted) return;
       setCurrentStep(STEPS.length - 1);
       setOverallProgress(98);
-      await completeScanRef.current(scanId, analysisResult);
+      const completion = await completeScanRef.current(scanId, analysisResult);
       if (cancelledRef.current || signal.aborted) return;
+      if (!completion) {
+        setCompletionError('Could not save your field report. Try scanning again.');
+        return;
+      }
+      setCompletedReportId(completion.report.id);
       setOverallProgress(100);
       setDone(true);
+      } catch (error) {
+        if (cancelledRef.current || signal.aborted || isScanCancelledError(error)) return;
+        if (__DEV__) {
+          console.warn('[processing] pipeline failed', error);
+        }
+        setAnalysisError(getScanAnalysisErrorMessage(error));
+      }
     }
 
-    void runPipeline();
+    void runPipeline().catch((error) => {
+      if (cancelledRef.current || isScanCancelledError(error)) return;
+      if (__DEV__) {
+        console.warn('[processing] unhandled pipeline error', error);
+      }
+      setAnalysisError(getScanAnalysisErrorMessage(error));
+    });
 
     return () => {
       cancelledRef.current = true;
-      abortControllerRef.current?.abort();
+      abortController.abort();
     };
   }, [selectedScanId, isAnalysisApiConfigured]);
 
@@ -194,7 +256,7 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
   }, []);
 
   const progress = done ? 100 : overallProgress;
-  const blocked = Boolean(analysisError);
+  const blocked = Boolean(analysisError || completionError);
   const showCancel = !done && !blocked && !cancelling;
 
   return (
@@ -208,20 +270,27 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
           {isFirstScan ? 'Analyzing Your First Scan' : 'Generating Field Report'}
         </Text>
         <Text style={styles.subtitle}>
-          {currentStep === 0 && !done
+          {currentStep === 0 && !done && !isAnalysisApiConfigured
             ? 'Uploading your field video to the cloud...'
-            : isFirstScan
-              ? 'Thera is checking the scan for weeds, crop stress, and potential treatment areas.'
-              : 'AI is analyzing your crop scan'}
+            : currentStep === 0 && !done
+              ? 'Preparing your scan for analysis...'
+              : isFirstScan
+                ? 'Thera is checking the scan for weeds, crop stress, and potential treatment areas.'
+                : 'AI is analyzing your crop scan'}
         </Text>
         {uploadError && (
           <Text style={styles.uploadWarning}>
-            Upload skipped: {uploadError} Analysis will continue with the local scan.
+            Cloud backup skipped: {uploadError} Your scan will still be analyzed from the video on this device.
           </Text>
         )}
         {analysisError && (
           <Text style={styles.analysisError}>
             Analysis failed: {analysisError}
+          </Text>
+        )}
+        {completionError && (
+          <Text style={styles.analysisError}>
+            {completionError}
           </Text>
         )}
         <View style={styles.progressRow}>
@@ -270,7 +339,14 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
 
       <View style={styles.footer}>
         {done ? (
-          <TouchableOpacity onPress={() => onNavigate('report')}>
+          <TouchableOpacity
+            onPress={() => {
+              if (completedReportId) {
+                setSelectedReportId(completedReportId);
+              }
+              onNavigate('report');
+            }}
+          >
             <View style={styles.doneBtn}>
               <Text style={styles.doneBtnText}>View Field Report →</Text>
             </View>
@@ -279,7 +355,9 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
           <>
             <View style={styles.waitCard}>
               <Text style={styles.waitText}>
-                Check that the analysis server is running and EXPO_PUBLIC_ANALYSIS_API_URL points to your machine&apos;s LAN IP.
+                {completionError
+                  ? 'Your scan finished processing but the report could not be saved. Go back and try again.'
+                  : 'Check that the analysis server is running and EXPO_PUBLIC_ANALYSIS_API_URL points to your machine\'s LAN IP.'}
               </Text>
             </View>
             <TouchableOpacity onPress={onBack} style={styles.cancelBtn}>

@@ -17,7 +17,10 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Thera uses the camera to record field scans while you walk crop rows.",
         "NSMicrophoneUsageDescription": "Thera records audio with field scan videos.",
-        "NSLocationWhenInUseUsageDescription": "Thera tracks your location during scans to map weeds and crop stress to your field."
+        "NSLocationWhenInUseUsageDescription": "Thera tracks your location during scans to map weeds and crop stress to your field.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
       }
     },
     "android": {
@@ -75,6 +78,9 @@
               "RNFBApp",
               "RNFBAuth"
             ]
+          },
+          "android": {
+            "usesCleartextTraffic": true
           }
         }
       ],

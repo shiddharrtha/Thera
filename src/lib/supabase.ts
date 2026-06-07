@@ -18,6 +18,6 @@ export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '', {
   accessToken: async () => {
     const user = firebaseAuth().currentUser;
     if (!user) return null;
-    return user.getIdToken(false);
+    return user.getIdToken(true);
   },
 });

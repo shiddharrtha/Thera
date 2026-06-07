@@ -16,7 +16,7 @@ from app.analysis.pipeline import analyze_video_file
 from app.auth import verify_request_auth
 from app.config import settings
 from app.models import AnalyzeScanRequest, AnalyzeScanResponse
-from app.storage import download_scan_video
+from app.storage import download_scan_video, upload_scan_video
 
 
 @asynccontextmanager
@@ -126,11 +126,24 @@ async def analyze_scan_upload(
 
     suffix = Path(video.filename or "scan.mp4").suffix or ".mp4"
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    video_path: str | None = request.video_path
     try:
         content = await video.read()
         temp_file.write(content)
         temp_file.close()
-        return await _run_analysis(request, Path(temp_file.name))
+        temp_path = Path(temp_file.name)
+
+        if not video_path:
+            try:
+                video_path = await upload_scan_video(request.user_id, request.scan_id, temp_path)
+                logger.info("Backed up scan %s to %s", request.scan_id, video_path)
+            except Exception as exc:
+                logger.warning("Cloud backup failed for scan %s: %s", request.scan_id, exc)
+
+        response = await _run_analysis(request, temp_path)
+        if video_path:
+            return response.model_copy(update={"video_path": video_path})
+        return response
     except ValueError as exc:
         logger.exception("Analysis request invalid: %s", exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

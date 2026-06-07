@@ -1,6 +1,9 @@
+import { fetch } from 'expo/fetch';
 import { File } from 'expo-file-system';
 import { firebaseAuth } from '../lib/firebase';
 import type { DetectedIssue, Field, FieldStatus, GpsPoint, Scan } from '../types/models';
+import { createAbortError, isAbortError } from '../utils/abortError';
+import { appendVideoToFormData } from '../utils/videoFormData';
 
 const ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -17,6 +20,7 @@ export interface ScanAnalysisResult {
   issues: DetectedIssue[];
   framesAnalyzed: number;
   analysisMode: 'yolo' | 'vegetation_cv';
+  videoPath?: string;
 }
 
 type AnalysisApiResponse = {
@@ -32,6 +36,7 @@ type AnalysisApiResponse = {
   issues: DetectedIssue[];
   frames_analyzed: number;
   analysis_mode: 'yolo' | 'vegetation_cv';
+  video_path?: string | null;
 };
 
 function normalizeAnalysisApiUrl(raw: string): string {
@@ -94,6 +99,7 @@ function mapAnalysisResponse(body: AnalysisApiResponse): ScanAnalysisResult {
     issues: body.issues ?? [],
     framesAnalyzed: body.frames_analyzed,
     analysisMode: body.analysis_mode,
+    videoPath: body.video_path ?? undefined,
   };
 }
 
@@ -118,7 +124,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string, signal?:
   return new Promise((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(timer);
-      reject(new DOMException('Scan cancelled.', 'AbortError'));
+      reject(createAbortError());
     };
 
     const timer = setTimeout(() => {
@@ -129,7 +135,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string, signal?:
     if (signal) {
       if (signal.aborted) {
         clearTimeout(timer);
-        reject(new DOMException('Scan cancelled.', 'AbortError'));
+        reject(createAbortError());
         return;
       }
       signal.addEventListener('abort', onAbort);
@@ -150,28 +156,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string, signal?:
   });
 }
 
-async function readLocalVideoPayload(localUri: string): Promise<Blob> {
+async function assertLocalVideoExists(localUri: string): Promise<void> {
   const file = new File(localUri);
   if (!file.exists) {
     throw new Error('Scan video file was not found on this device.');
   }
-
-  const response = await fetch(localUri);
-  if (!response.ok) {
-    throw new Error('Could not read local scan video for analysis.');
-  }
-
-  const blob = await response.blob();
-  if (blob.size === 0) {
-    throw new Error('Scan video file is empty.');
-  }
-  return blob;
 }
 
 export function isScanCancelledError(error: unknown): boolean {
-  if (error instanceof DOMException && error.name === 'AbortError') return true;
-  if (error instanceof Error && error.name === 'AbortError') return true;
-  return error instanceof Error && error.message === 'Scan cancelled.';
+  return isAbortError(error);
 }
 
 export function getScanAnalysisErrorMessage(error: unknown): string {
@@ -184,6 +177,10 @@ export function getScanAnalysisErrorMessage(error: unknown): string {
       : typeof error === 'object' && error && 'message' in error
         ? String((error as { message: string }).message)
         : 'Scan analysis failed.';
+
+  if (/Unsupported FormDataPart/i.test(message)) {
+    return 'Video upload failed on this device. Reload the app and try again.';
+  }
 
   if (/timed out/i.test(message)) {
     return 'Analysis took too long. Check your connection and try again.';
@@ -210,7 +207,7 @@ export async function analyzeScanVideo(
   }
 
   if (signal?.aborted) {
-    throw new DOMException('Scan cancelled.', 'AbortError');
+    throw createAbortError();
   }
 
   onProgress?.(5);
@@ -247,11 +244,16 @@ export async function analyzeScanVideo(
     if (useMultipart) {
       const formData = new FormData();
       formData.append('payload', JSON.stringify(payload));
-      const blob = await readLocalVideoPayload(scan.videoUri!);
-      formData.append('video', blob, `${scan.id}.mp4`);
+
+      onProgress?.(20);
+      startHeartbeat();
+      heartbeatProgress = 22;
+
+      await assertLocalVideoExists(scan.videoUri!);
+      await appendVideoToFormData(formData, 'video', scan.videoUri!, `${scan.id}.mp4`);
 
       onProgress?.(35);
-      startHeartbeat();
+      heartbeatProgress = 35;
       response = await withTimeout(
         fetch(endpoint, {
           method: 'POST',
@@ -286,7 +288,7 @@ export async function analyzeScanVideo(
   }
 
   if (signal?.aborted) {
-    throw new DOMException('Scan cancelled.', 'AbortError');
+    throw createAbortError();
   }
 
   onProgress?.(85);

@@ -47,3 +47,4 @@ class AnalyzeScanResponse(BaseModel):
     issues: list[DetectedIssue]
     frames_analyzed: int
     analysis_mode: Literal["yolo", "vegetation_cv"]
+    video_path: str | None = None

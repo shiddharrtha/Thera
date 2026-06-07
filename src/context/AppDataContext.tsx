@@ -4,11 +4,12 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { useAuth } from './AuthContext';
-import { clearAppData, loadAppData, saveAppData } from '../lib/appStorage';
+import { clearAppData, EMPTY_APP_DATA, loadAppData, saveAppData } from '../lib/appStorage';
 import {
   completeScanRemote,
   createField,
@@ -46,6 +47,7 @@ import type {
 import { DEFAULT_SETTINGS, FREE_LIMITS } from '../types/models';
 import {
   assignFieldsToFarm,
+  ensureFieldFarmId,
   getFieldsForFarm,
   getReportsForFarm,
   getScansForFarm,
@@ -164,14 +166,17 @@ function buildCompletedScanState(
   const report = analysis
     ? buildReportFromAnalysis(field, completedScan, analysis)
     : generateMockReportFromScan(field, completedScan);
-  const updatedField: Field = {
-    ...field,
-    healthScore: report.healthScore,
-    openIssues: report.findingsCount,
-    totalSavings: report.estimatedSavings,
-    lastScanDate: toIsoTimestamp(getScanRecordedAtMs(completedScan)),
-    status: report.severity,
-  };
+  const updatedField: Field = ensureFieldFarmId(
+    {
+      ...field,
+      healthScore: report.healthScore,
+      openIssues: report.findingsCount,
+      totalSavings: report.estimatedSavings,
+      lastScanDate: toIsoTimestamp(getScanRecordedAtMs(completedScan)),
+      status: report.severity,
+    },
+    current.selectedFarmId,
+  );
 
   return {
     scan: completedScan,
@@ -254,20 +259,21 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const dataRef = useRef(data);
+
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
   useEffect(() => {
     if (!user) {
-      setData({
-        onboardingComplete: false,
-        farms: [],
-        selectedFarmId: null,
-        fields: [],
-        scans: [],
-        reports: [],
+      const emptyState: AppDataState = {
+        ...EMPTY_APP_DATA,
         settings: DEFAULT_SETTINGS,
         subscription: { planId: 'free' },
-        costAssumptions: null,
-      });
+      };
+      dataRef.current = emptyState;
+      setData(emptyState);
       setSelectedFieldId(null);
       setSelectedScanId(null);
       setSelectedReportId(null);
@@ -371,16 +377,33 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           reports,
         };
         await saveAppData(user.uid, merged);
+        dataRef.current = merged;
         return merged;
       })
-      .then(setData)
+      .then((merged) => {
+        dataRef.current = merged;
+        setData(merged);
+      })
       .finally(() => setLoading(false));
   }, [user?.uid, displayName]);
 
   const persist = useCallback(
     async (next: AppDataState) => {
+      dataRef.current = next;
       setData(next);
       if (user) await saveAppData(user.uid, next);
+    },
+    [user],
+  );
+
+  /** Apply a state change from the latest snapshot (avoids stale-closure overwrites during scans). */
+  const mutateAppData = useCallback(
+    async (recipe: (prev: AppDataState) => AppDataState): Promise<AppDataState> => {
+      const next = recipe(dataRef.current);
+      dataRef.current = next;
+      setData(next);
+      if (user) await saveAppData(user.uid, next);
+      return next;
     },
     [user],
   );
@@ -575,65 +598,86 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   const startScan = useCallback(
     async (fieldId: string, capture?: ScanCapture) => {
-      const isFirstScan = data.scans.filter((s) => s.status === 'completed').length === 0;
-      const recordedAtMs = capture?.recordedAtMs ?? Date.now();
-      const scan: Scan = {
-        id: createId('scan'),
-        fieldId,
-        createdAt: toIsoTimestamp(recordedAtMs),
-        recordedAtMs,
-        status: 'uploading',
-        progress: 0,
-        isFirstScan,
-        videoUri: capture?.videoUri,
-        videoDurationSeconds: capture?.durationSeconds,
-        gpsTrack: capture?.gpsTrack,
-      };
+      const scanRef: { value: Scan | null } = { value: null };
 
-      const next = { ...data, scans: [...data.scans, scan] };
-      await persist(next);
+      await mutateAppData((prev) => {
+        const isFirstScan = prev.scans.filter((s) => s.status === 'completed').length === 0;
+        const recordedAtMs = capture?.recordedAtMs ?? Date.now();
+        const scan: Scan = {
+          id: createId('scan'),
+          fieldId,
+          createdAt: toIsoTimestamp(recordedAtMs),
+          recordedAtMs,
+          status: 'uploading',
+          progress: 0,
+          isFirstScan,
+          videoUri: capture?.videoUri,
+          videoDurationSeconds: capture?.durationSeconds,
+          gpsTrack: capture?.gpsTrack,
+        };
+        scanRef.value = scan;
+        return { ...prev, scans: [...prev.scans, scan] };
+      });
+
+      const scan = scanRef.value;
+      if (!scan) throw new Error('Could not start scan.');
+
       setSelectedScanId(scan.id);
       setSelectedFieldId(fieldId);
       return scan;
     },
-    [data, persist, user],
+    [mutateAppData],
   );
 
   const advanceScanProgress = useCallback(
     async (scanId: string, progress: number, status?: Scan['status']) => {
-      const scan = data.scans.find((s) => s.id === scanId);
-      if (!scan) return null;
-      const updated: Scan = {
-        ...scan,
-        progress,
-        status: status ?? scan.status,
-      };
-      await persist({
-        ...data,
-        scans: data.scans.map((s) => (s.id === scanId ? updated : s)),
+      const updatedRef: { value: Scan | null } = { value: null };
+
+      await mutateAppData((prev) => {
+        const scan = prev.scans.find((s) => s.id === scanId);
+        if (!scan) return prev;
+        const updated: Scan = {
+          ...scan,
+          progress,
+          status: status ?? scan.status,
+        };
+        updatedRef.value = updated;
+        return {
+          ...prev,
+          scans: prev.scans.map((s) => (s.id === scanId ? updated : s)),
+        };
       });
-      return updated;
+
+      return updatedRef.value;
     },
-    [data, persist, user],
+    [mutateAppData],
   );
 
   const uploadScanVideo = useCallback(
     async (scanId: string, onProgress?: (percent: number) => void, signal?: AbortSignal) => {
-      const scan = data.scans.find((s) => s.id === scanId);
+      const scanRef: { value: Scan | null } = { value: null };
+
+      await mutateAppData((prev) => {
+        scanRef.value = prev.scans.find((s) => s.id === scanId) ?? null;
+        return prev;
+      });
+
+      const scan = scanRef.value;
       if (!scan?.videoUri) return scan ?? null;
       if (scan.videoUrl) return scan;
 
-      const mapUploadProgress = (uploadPercent: number) => {
-        onProgress?.(uploadPercent);
-      };
-
       if (!user) {
-        const localOnly: Scan = { ...scan, status: 'processing', progress: 30 };
-        await persist({
-          ...data,
-          scans: data.scans.map((s) => (s.id === scanId ? localOnly : s)),
+        await mutateAppData((prev) => {
+          const latest = prev.scans.find((s) => s.id === scanId);
+          if (!latest) return prev;
+          const localOnly: Scan = { ...latest, status: 'processing', progress: 30 };
+          scanRef.value = localOnly;
+          return {
+            ...prev,
+            scans: prev.scans.map((s) => (s.id === scanId ? localOnly : s)),
+          };
         });
-        return localOnly;
+        return scanRef.value;
       }
 
       try {
@@ -641,23 +685,27 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           user.uid,
           scanId,
           scan.videoUri,
-          mapUploadProgress,
+          onProgress,
           signal,
         );
 
-        const updated: Scan = {
-          ...scan,
-          videoUrl: storagePath,
-          progress: 30,
-          status: 'processing',
-        };
+        await mutateAppData((prev) => {
+          const latest = prev.scans.find((s) => s.id === scanId);
+          if (!latest) return prev;
+          const updated: Scan = {
+            ...latest,
+            videoUrl: storagePath,
+            progress: 30,
+            status: 'processing',
+          };
+          scanRef.value = updated;
+          return {
+            ...prev,
+            scans: prev.scans.map((s) => (s.id === scanId ? updated : s)),
+          };
+        });
 
-        const next = {
-          ...data,
-          scans: data.scans.map((s) => (s.id === scanId ? updated : s)),
-        };
-        await persist(next);
-        return updated;
+        return scanRef.value;
       } catch (error) {
         if (__DEV__) {
           console.warn('[scanUpload] upload failed', error);
@@ -665,13 +713,32 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         throw error;
       }
     },
-    [data, persist, user],
+    [mutateAppData, user],
   );
 
   const analyzeScan = useCallback(
     async (scanId: string, onProgress?: (percent: number) => void, signal?: AbortSignal) => {
-      const scan = data.scans.find((s) => s.id === scanId);
-      const field = data.fields.find((f) => f.id === scan?.fieldId);
+      const contextRef: {
+        scan: Scan | null;
+        field: Field | null;
+      } = { scan: null, field: null };
+
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const snapshot = dataRef.current;
+        if (!snapshot) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          continue;
+        }
+        const scan = snapshot.scans.find((s) => s.id === scanId) ?? null;
+        const field = snapshot.fields.find((f) => f.id === scan?.fieldId) ?? null;
+        contextRef.scan = scan;
+        contextRef.field = field;
+
+        if (scan && field) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      const { scan, field } = contextRef;
       if (!scan || !field) return null;
 
       if (!user) {
@@ -679,31 +746,37 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       }
 
       const analysis = await analyzeScanVideo(scan, field, user.uid, onProgress, signal);
-      const updated: Scan = {
-        ...scan,
-        weedCoverage: analysis.weedCoverage,
-        stressCoverage: analysis.stressCoverage,
-        healthScore: analysis.healthScore,
-        progress: 99,
-        status: 'processing',
-      };
+      const resultRef: { value: { scan: Scan; analysis: ScanAnalysisResult } | null } = { value: null };
 
-      const next = {
-        ...data,
-        scans: data.scans.map((s) => (s.id === scanId ? updated : s)),
-      };
-      await persist(next);
+      await mutateAppData((prev) => {
+        const latest = prev.scans.find((s) => s.id === scanId);
+        if (!latest) return prev;
+        const updated: Scan = {
+          ...latest,
+          weedCoverage: analysis.weedCoverage,
+          stressCoverage: analysis.stressCoverage,
+          healthScore: analysis.healthScore,
+          progress: 99,
+          status: 'processing',
+          ...(analysis.videoPath ? { videoUrl: analysis.videoPath } : {}),
+        };
+        resultRef.value = { scan: updated, analysis };
+        return {
+          ...prev,
+          scans: prev.scans.map((s) => (s.id === scanId ? updated : s)),
+        };
+      });
 
-      return { scan: updated, analysis };
+      return resultRef.value;
     },
-    [data, persist, user],
+    [mutateAppData, user],
   );
 
   const completeScan = useCallback(
     async (scanId: string, analysis?: ScanAnalysisResult) => {
       const completionRef: { value: CompletedScanPayload | null } = { value: null };
 
-      setData((current) => {
+      await mutateAppData((current) => {
         const built = buildCompletedScanState(current, scanId, analysis);
         if (!built) return current;
         completionRef.value = built;
@@ -714,7 +787,6 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       if (!completion) return null;
 
       if (user) {
-        await saveAppData(user.uid, completion.next);
         try {
           await completeScanRemote(user.uid, completion.scan, completion.report, completion.updatedField);
         } catch (error) {
@@ -725,31 +797,28 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       }
 
       setSelectedReportId(completion.report.id);
+      setSelectedScanId(completion.scan.id);
+      setSelectedFieldId(completion.report.fieldId);
       return { scan: completion.scan, report: completion.report };
     },
-    [user],
+    [mutateAppData, user],
   );
 
   const discardScan = useCallback(
     async (scanId: string) => {
-      const nextRef: { value: AppDataState | null } = { value: null };
+      const current = dataRef.current;
+      const scan = current.scans.find((s) => s.id === scanId);
+      if (!scan || scan.status === 'completed') return;
 
-      setData((current) => {
-        const scan = current.scans.find((s) => s.id === scanId);
-        if (!scan || scan.status === 'completed') return current;
-
-        const next = {
-          ...current,
-          scans: current.scans.filter((s) => s.id !== scanId),
-        };
-        nextRef.value = next;
-        return next;
-      });
-
-      if (!nextRef.value) return;
+      const next = {
+        ...current,
+        scans: current.scans.filter((s) => s.id !== scanId),
+      };
+      dataRef.current = next;
+      setData(next);
 
       if (user) {
-        await saveAppData(user.uid, nextRef.value);
+        await saveAppData(user.uid, next);
       }
 
       if (selectedScanId === scanId) {
