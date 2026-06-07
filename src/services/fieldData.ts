@@ -285,7 +285,12 @@ export async function fetchFieldData(userId: string): Promise<{
 }> {
   const [fieldsResult, scansResult, reportsResult] = await Promise.all([
     supabase.from('fields').select('*').eq('user_id', userId).order('created_at', { ascending: true }),
-    supabase.from('scans').select('*').eq('user_id', userId).order('created_at', { ascending: true }),
+    supabase
+      .from('scans')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .order('created_at', { ascending: true }),
     supabase.from('reports').select('*').eq('user_id', userId).order('created_at', { ascending: true }),
   ]);
 
@@ -390,14 +395,14 @@ export async function createReport(userId: string, report: Report) {
   });
 }
 
-/** Persist scan completion: update scan, insert report, update field. */
+/** Persist scan completion: insert completed scan, report, and update field. */
 export async function completeScanRemote(
   userId: string,
   scan: Scan,
   report: Report,
   field: Field,
 ) {
-  await updateScan(userId, scan);
+  await createScan(userId, scan);
   await createReport(userId, report);
   await withAuthRetry(async () => {
     const row = fieldToRow(field, userId);
@@ -429,8 +434,9 @@ export async function migrateLocalFieldData(
     const { error: fieldsError } = await supabase.from('fields').upsert(fieldRows, { onConflict: 'id' });
     if (fieldsError) throw fieldsError;
 
-    if (local.scans.length > 0) {
-      const scanRows = local.scans.map((scan) => scanToRow(scan, user.uid));
+    const completedScans = local.scans.filter((scan) => scan.status === 'completed');
+    if (completedScans.length > 0) {
+      const scanRows = completedScans.map((scan) => scanToRow(scan, user.uid));
       const { error: scansError } = await supabase.from('scans').upsert(scanRows, { onConflict: 'id' });
       if (scansError) throw scansError;
     }

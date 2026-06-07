@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { AppDataState } from '../types/models';
+import type { AppDataState, Scan } from '../types/models';
 import {
   DEFAULT_SETTINGS,
   DEFAULT_SUBSCRIPTION,
@@ -22,6 +22,10 @@ export const EMPTY_APP_DATA: AppDataState = {
   costAssumptions: null,
 };
 
+export function completedScansOnly(scans: Scan[] = []) {
+  return scans.filter((scan) => scan.status === 'completed');
+}
+
 export async function loadAppData(userId: string): Promise<AppDataState> {
   try {
     const raw = await AsyncStorage.getItem(storageKey(userId));
@@ -30,6 +34,7 @@ export async function loadAppData(userId: string): Promise<AppDataState> {
     return {
       ...EMPTY_APP_DATA,
       ...parsed,
+      scans: completedScansOnly(parsed.scans),
       settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
       subscription: { ...DEFAULT_SUBSCRIPTION, ...parsed.subscription },
     };
@@ -39,7 +44,10 @@ export async function loadAppData(userId: string): Promise<AppDataState> {
 }
 
 export async function saveAppData(userId: string, data: AppDataState) {
-  await AsyncStorage.setItem(storageKey(userId), JSON.stringify(data));
+  await AsyncStorage.setItem(
+    storageKey(userId),
+    JSON.stringify({ ...data, scans: completedScansOnly(data.scans) }),
+  );
 }
 
 export async function clearAppData(userId: string) {

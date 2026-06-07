@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
 import { useAppData } from '../context/AppDataContext';
 import { getScanVideoErrorMessage } from '../services/scanUpload';
-import { getScanAnalysisErrorMessage } from '../services/scanAnalysis';
+import { getScanAnalysisErrorMessage, isScanCancelledError } from '../services/scanAnalysis';
 import type { ScanAnalysisResult } from '../services/scanAnalysis';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
@@ -41,7 +41,7 @@ function mapAnalysisPercentToOverall(analysisPercent: number): number {
   return UPLOAD_PROGRESS_MAX + Math.round((analysisPercent / 100) * span);
 }
 
-export function ProcessingScreen({ onNavigate }: ScreenProps) {
+export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
   const {
     selectedScanId,
     getScan,
@@ -49,6 +49,7 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
     analyzeScan,
     advanceScanProgress,
     completeScan,
+    discardScan,
     isAnalysisApiConfigured,
   } = useAppData();
   const scan = selectedScanId ? getScan(selectedScanId) : undefined;
@@ -56,32 +57,54 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
 
   const [currentStep, setCurrentStep] = useState(0);
   const [done, setDone] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [scanLine, setScanLine] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [overallProgress, setOverallProgress] = useState(0);
   const pipelineScanIdRef = useRef<string | null>(null);
+  const cancelledRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const getScanRef = useRef(getScan);
   const uploadScanVideoRef = useRef(uploadScanVideo);
   const analyzeScanRef = useRef(analyzeScan);
   const advanceScanProgressRef = useRef(advanceScanProgress);
   const completeScanRef = useRef(completeScan);
+  const discardScanRef = useRef(discardScan);
 
   getScanRef.current = getScan;
   uploadScanVideoRef.current = uploadScanVideo;
   analyzeScanRef.current = analyzeScan;
   advanceScanProgressRef.current = advanceScanProgress;
   completeScanRef.current = completeScan;
+  discardScanRef.current = discardScan;
+
+  const handleCancel = useCallback(async () => {
+    if (done || cancelling) return;
+
+    cancelledRef.current = true;
+    abortControllerRef.current?.abort();
+    setCancelling(true);
+
+    const scanId = selectedScanId;
+    if (scanId) {
+      await discardScanRef.current(scanId);
+    }
+
+    onBack();
+  }, [cancelling, done, onBack, selectedScanId]);
 
   useEffect(() => {
     if (!selectedScanId || pipelineScanIdRef.current === selectedScanId) return;
     pipelineScanIdRef.current = selectedScanId;
 
-    let cancelled = false;
+    cancelledRef.current = false;
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
 
     async function runMockAnalysis(scanId: string) {
       for (let step = 1; step < STEPS.length; step++) {
-        if (cancelled) return;
+        if (cancelledRef.current || signal.aborted) return;
 
         setCurrentStep(step);
         const analysisProgress =
@@ -103,17 +126,18 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
       setUploadError(null);
       setAnalysisError(null);
       setDone(false);
+      setCancelling(false);
       setOverallProgress(0);
 
       if (initialScan.videoUri && !initialScan.videoUrl) {
         try {
           await uploadScanVideoRef.current(scanId, (uploadPercent) => {
-            if (cancelled) return;
+            if (cancelledRef.current || signal.aborted) return;
             const progress = Math.round((uploadPercent / 100) * UPLOAD_PROGRESS_MAX);
             setOverallProgress(progress);
-          });
+          }, signal);
         } catch (error) {
-          if (cancelled) return;
+          if (cancelledRef.current || signal.aborted || isScanCancelledError(error)) return;
           setUploadError(getScanVideoErrorMessage(error));
           await advanceScanProgressRef.current(scanId, UPLOAD_PROGRESS_MAX, 'processing');
           setOverallProgress(UPLOAD_PROGRESS_MAX);
@@ -123,7 +147,7 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
         setOverallProgress(UPLOAD_PROGRESS_MAX);
       }
 
-      if (cancelled) return;
+      if (cancelledRef.current || signal.aborted) return;
       setCurrentStep(1);
 
       let analysisResult: ScanAnalysisResult | undefined;
@@ -131,25 +155,27 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
       if (isAnalysisApiConfigured) {
         try {
           const result = await analyzeScanRef.current(scanId, (analysisPercent) => {
-            if (cancelled) return;
+            if (cancelledRef.current || signal.aborted) return;
             setCurrentStep(mapAnalysisProgressToStep(analysisPercent));
             const overall = mapAnalysisPercentToOverall(analysisPercent);
             setOverallProgress(overall);
-          });
+          }, signal);
           analysisResult = result?.analysis;
         } catch (error) {
-          if (cancelled) return;
+          if (cancelledRef.current || signal.aborted || isScanCancelledError(error)) return;
           setAnalysisError(getScanAnalysisErrorMessage(error));
+          await discardScanRef.current(scanId);
           return;
         }
       } else {
         await runMockAnalysis(scanId);
       }
 
-      if (cancelled) return;
+      if (cancelledRef.current || signal.aborted) return;
       setCurrentStep(STEPS.length - 1);
       setOverallProgress(98);
       await completeScanRef.current(scanId, analysisResult);
+      if (cancelledRef.current || signal.aborted) return;
       setOverallProgress(100);
       setDone(true);
     }
@@ -157,7 +183,8 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
     void runPipeline();
 
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
+      abortControllerRef.current?.abort();
     };
   }, [selectedScanId, isAnalysisApiConfigured]);
 
@@ -168,6 +195,7 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
 
   const progress = done ? 100 : overallProgress;
   const blocked = Boolean(analysisError);
+  const showCancel = !done && !blocked && !cancelling;
 
   return (
     <View style={styles.container}>
@@ -207,7 +235,7 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
       <ScrollView style={styles.steps}>
         {STEPS.map((step, i) => {
           const completed = i < currentStep || done;
-          const active = i === currentStep && !done && !blocked;
+          const active = i === currentStep && !done && !blocked && !cancelling;
           return (
             <View key={step} style={styles.stepRow}>
               <View style={styles.stepIndicatorCol}>
@@ -248,17 +276,34 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
             </View>
           </TouchableOpacity>
         ) : blocked ? (
+          <>
+            <View style={styles.waitCard}>
+              <Text style={styles.waitText}>
+                Check that the analysis server is running and EXPO_PUBLIC_ANALYSIS_API_URL points to your machine&apos;s LAN IP.
+              </Text>
+            </View>
+            <TouchableOpacity onPress={onBack} style={styles.cancelBtn}>
+              <Text style={styles.cancelBtnText}>Go Back</Text>
+            </TouchableOpacity>
+          </>
+        ) : cancelling ? (
           <View style={styles.waitCard}>
-            <Text style={styles.waitText}>
-              Check that the analysis server is running and EXPO_PUBLIC_ANALYSIS_API_URL points to your machine&apos;s LAN IP.
-            </Text>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={[styles.waitText, styles.cancellingText]}>Cancelling scan...</Text>
           </View>
         ) : (
-          <View style={styles.waitCard}>
-            <Text style={styles.waitText}>
-              You can leave this screen. We will notify you when the report is ready.
-            </Text>
-          </View>
+          <>
+            <View style={styles.waitCard}>
+              <Text style={styles.waitText}>
+                You can cancel below if you don&apos;t want to finish this report.
+              </Text>
+            </View>
+            {showCancel && (
+              <TouchableOpacity onPress={() => void handleCancel()} style={styles.cancelBtn}>
+                <Text style={styles.cancelBtnText}>Cancel Report</Text>
+              </TouchableOpacity>
+            )}
+          </>
         )}
       </View>
     </View>
@@ -321,7 +366,7 @@ const styles = createStyles({
   stepLabelActive: { color: colors.gray900 },
   stepProcessing: { fontSize: 12, color: colors.gray400, marginTop: 2 },
   stepComplete: { fontSize: 12, color: colors.success, marginTop: 2 },
-  footer: { marginTop: 16 },
+  footer: { marginTop: 16, gap: 12 },
   doneBtn: {
     backgroundColor: colors.primary,
     paddingVertical: 16,
@@ -334,6 +379,15 @@ const styles = createStyles({
     elevation: 6,
   },
   doneBtnText: { color: colors.white, fontWeight: '700', fontSize: 16 },
-  waitCard: { backgroundColor: colors.background, borderRadius: 16, padding: 16, alignItems: 'center' },
+  waitCard: { backgroundColor: colors.background, borderRadius: 16, padding: 16, alignItems: 'center', gap: 8 },
   waitText: { fontSize: 14, color: colors.gray500, textAlign: 'center' },
+  cancellingText: { marginTop: 4 },
+  cancelBtn: {
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.destructive,
+  },
+  cancelBtnText: { color: colors.destructive, fontWeight: '700', fontSize: 15 },
 });

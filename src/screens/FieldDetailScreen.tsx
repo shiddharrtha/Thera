@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,8 +8,16 @@ import { useAppData } from '../context/AppDataContext';
 import { EmptyState } from '../components/EmptyState';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
-import { formatOptionalDisplayDateTime, formatFromEpochMs, parseApiTimestamp } from '../utils/timestamps';
-import { formatPercent, getLatestCompletedScan, pressureColor, pressureLabel } from '../utils/scanMetrics';
+import { formatOptionalDisplayDateTime, formatScanTimestamp, parseApiTimestamp } from '../utils/timestamps';
+import {
+  formatPercent,
+  getLatestCompletedScan,
+  pressureColor,
+  pressureLabel,
+  severityBadgeColors,
+  severityLabel,
+} from '../utils/scanMetrics';
+import type { Report, Scan } from '../types/models';
 
 type Tab = 'overview' | 'map' | 'timeline' | 'reports';
 
@@ -24,6 +32,21 @@ export function FieldDetailScreen({ onNavigate, onBack }: ScreenProps) {
   const { selectedFieldId, getField, getReportsForField, getScansForField, setSelectedReportId } = useAppData();
   const [tab, setTab] = useState<Tab>('overview');
   const field = selectedFieldId ? getField(selectedFieldId) : undefined;
+  const reports = field ? getReportsForField(field.id) : [];
+  const scans = field ? getScansForField(field.id) : [];
+  const scanById = useMemo(
+    () => new Map(scans.map((scan) => [scan.id, scan])),
+    [scans],
+  );
+  const sortedReports = useMemo(
+    () =>
+      [...reports].sort((a, b) => {
+        const aMs = a.recordedAtMs ?? parseApiTimestamp(a.createdAt);
+        const bMs = b.recordedAtMs ?? parseApiTimestamp(b.createdAt);
+        return bMs - aMs;
+      }),
+    [reports],
+  );
 
   if (!field) {
     return (
@@ -40,8 +63,6 @@ export function FieldDetailScreen({ onNavigate, onBack }: ScreenProps) {
   }
 
   const st = STATUS_LABELS[field.status];
-  const reports = getReportsForField(field.id);
-  const scans = getScansForField(field.id);
   const latestScan = getLatestCompletedScan(scans);
   const hasScan = field.status !== 'unscanned';
 
@@ -118,8 +139,8 @@ export function FieldDetailScreen({ onNavigate, onBack }: ScreenProps) {
                 <TouchableOpacity
                   style={styles.actionBtnOutline}
                   onPress={() => {
-                    if (reports[0]) {
-                      setSelectedReportId(reports[0].id);
+                    if (sortedReports[0]) {
+                      setSelectedReportId(sortedReports[0].id);
                       onNavigate('report');
                     }
                   }}
@@ -160,7 +181,7 @@ export function FieldDetailScreen({ onNavigate, onBack }: ScreenProps) {
         )}
 
         {tab === 'reports' && (
-          reports.length === 0 ? (
+          sortedReports.length === 0 ? (
             <EmptyState
               icon="document-text-outline"
               title="No reports yet"
@@ -169,28 +190,120 @@ export function FieldDetailScreen({ onNavigate, onBack }: ScreenProps) {
               onAction={() => onNavigate('scan')}
             />
           ) : (
-            reports.map((r) => (
-              <TouchableOpacity
-                key={r.id}
-                style={styles.reportCard}
-                onPress={() => {
-                  setSelectedReportId(r.id);
-                  onNavigate('report');
-                }}
-              >
-                <View>
-                  <Text style={styles.reportDate}>{formatFromEpochMs(parseApiTimestamp(r.createdAt))}</Text>
-                  <Text style={styles.reportSummary} numberOfLines={2}>{r.summary}</Text>
-                </View>
-                <View style={styles.reportMeta}>
-                  <Text style={styles.reportSavings}>${r.estimatedSavings}</Text>
-                  <Ionicons name="chevron-forward" size={16} color={colors.gray400} />
-                </View>
-              </TouchableOpacity>
-            ))
+            <>
+              <View style={styles.reportsHeader}>
+                <Text style={styles.reportsTitle}>Field Reports</Text>
+                <Text style={styles.reportsSubtitle}>
+                  {sortedReports.length} report{sortedReports.length === 1 ? '' : 's'} · newest first
+                </Text>
+              </View>
+              {sortedReports.map((report) => (
+                <FieldReportCard
+                  key={report.id}
+                  report={report}
+                  scan={scanById.get(report.scanId)}
+                  onPress={() => {
+                    setSelectedReportId(report.id);
+                    onNavigate('report');
+                  }}
+                />
+              ))}
+            </>
           )
         )}
       </ScrollView>
+    </View>
+  );
+}
+
+function FieldReportCard({
+  report,
+  scan,
+  onPress,
+}: {
+  report: Report;
+  scan?: Scan;
+  onPress: () => void;
+}) {
+  const badge = severityBadgeColors(report.severity);
+
+  return (
+    <TouchableOpacity style={styles.reportCard} onPress={onPress} activeOpacity={0.85}>
+      <View style={styles.reportCardTop}>
+        <HealthRing score={Math.round(report.healthScore)} size={52} />
+        <View style={styles.reportCardMain}>
+          <View style={styles.reportCardHeader}>
+            <Text style={styles.reportDate}>{formatScanTimestamp(report)}</Text>
+            <View style={[styles.reportSeverityBadge, { backgroundColor: badge.bg }]}>
+              <Text style={[styles.reportSeverityText, { color: badge.text }]}>
+                {severityLabel(report.severity)}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.reportMetricsRow}>
+            <ReportMetric
+              label="Weed"
+              value={formatPercent(scan?.weedCoverage)}
+              tone={pressureColor(scan?.weedCoverage)}
+              caption={pressureLabel(scan?.weedCoverage)}
+            />
+            <ReportMetric
+              label="Stress"
+              value={formatPercent(scan?.stressCoverage)}
+              tone={pressureColor(scan?.stressCoverage)}
+              caption={pressureLabel(scan?.stressCoverage)}
+            />
+            <ReportMetric
+              label="Issues"
+              value={String(report.findingsCount)}
+              tone={report.findingsCount > 0 ? colors.warning : colors.success}
+            />
+          </View>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.gray400} style={styles.reportChevron} />
+      </View>
+
+      <Text style={styles.reportSummary} numberOfLines={3}>
+        {report.summary}
+      </Text>
+
+      <View style={styles.reportFooter}>
+        <View style={styles.reportFooterStat}>
+          <Ionicons name="water-outline" size={14} color={colors.primary} />
+          <Text style={styles.reportFooterText}>
+            {report.recommendedSprayAcres.toLocaleString()} ac spray
+          </Text>
+        </View>
+        <View style={styles.reportFooterStat}>
+          <Ionicons name="leaf-outline" size={14} color={colors.success} />
+          <Text style={styles.reportFooterText}>
+            {Math.round(report.chemicalReductionPercent)}% chemical reduction
+          </Text>
+        </View>
+        <Text style={styles.reportSavings}>
+          ${report.estimatedSavings.toLocaleString()} saved
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function ReportMetric({
+  label,
+  value,
+  tone,
+  caption,
+}: {
+  label: string;
+  value: string;
+  tone: string;
+  caption?: string;
+}) {
+  return (
+    <View style={styles.reportMetric}>
+      <Text style={styles.reportMetricLabel}>{label}</Text>
+      <Text style={[styles.reportMetricValue, { color: tone }]}>{value}</Text>
+      {caption ? <Text style={styles.reportMetricCaption}>{caption}</Text> : null}
     </View>
   );
 }
@@ -300,16 +413,67 @@ const styles = createStyles({
     alignItems: 'center',
   },
   actionBtnOutlineText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+  reportsHeader: { marginBottom: 2 },
+  reportsTitle: { fontSize: 16, fontWeight: '800', color: colors.gray900 },
+  reportsSubtitle: { fontSize: 12, color: colors.gray400, marginTop: 2 },
   reportCard: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  reportCardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  reportCardMain: { flex: 1, minWidth: 0, gap: 10 },
+  reportCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    backgroundColor: colors.white,
-    borderRadius: 14,
-    padding: 14,
+    justifyContent: 'space-between',
+    gap: 8,
   },
-  reportDate: { fontSize: 10, color: colors.gray400 },
-  reportSummary: { fontSize: 12, color: colors.gray700, marginTop: 4, flex: 1 },
-  reportMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  reportSavings: { fontWeight: '700', fontSize: 14, color: colors.primary },
+  reportDate: { flex: 1, fontSize: 13, fontWeight: '700', color: colors.gray900 },
+  reportSeverityBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  reportSeverityText: { fontSize: 10, fontWeight: '700' },
+  reportMetricsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  reportMetric: {
+    flex: 1,
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+  },
+  reportMetricLabel: { fontSize: 10, color: colors.gray400, fontWeight: '600' },
+  reportMetricValue: { fontSize: 14, fontWeight: '800', marginTop: 2 },
+  reportMetricCaption: { fontSize: 9, color: colors.gray500, marginTop: 1 },
+  reportChevron: { marginTop: 14 },
+  reportSummary: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.gray600,
+  },
+  reportFooter: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 10,
+    paddingTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  reportFooterStat: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  reportFooterText: { fontSize: 11, color: colors.gray500, fontWeight: '600' },
+  reportSavings: {
+    marginLeft: 'auto',
+    fontWeight: '800',
+    fontSize: 13,
+    color: colors.primary,
+  },
 });

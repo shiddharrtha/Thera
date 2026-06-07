@@ -9,23 +9,46 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string, signal?: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Scan cancelled.', 'AbortError'));
+    };
+
     const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
       reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`));
     }, ms);
+
+    if (signal) {
+      if (signal.aborted) {
+        clearTimeout(timer);
+        reject(new DOMException('Scan cancelled.', 'AbortError'));
+        return;
+      }
+      signal.addEventListener('abort', onAbort);
+    }
 
     promise.then(
       (value) => {
         clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
         resolve(value);
       },
       (error) => {
         clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
         reject(error);
       },
     );
   });
+}
+
+function assertNotAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException('Scan cancelled.', 'AbortError');
+  }
 }
 
 async function refreshFirebaseToken(force = true) {
@@ -95,17 +118,21 @@ export async function uploadScanVideoFile(
   scanId: string,
   localUri: string,
   onProgress?: (percent: number) => void,
+  signal?: AbortSignal,
 ): Promise<string> {
   const storagePath = getScanVideoStoragePath(userId, scanId);
 
+  assertNotAborted(signal);
   onProgress?.(5);
   await refreshFirebaseToken(true);
 
+  assertNotAborted(signal);
   onProgress?.(10);
   const payload = await withTimeout(
     readVideoPayload(localUri),
     UPLOAD_TIMEOUT_MS,
     'Reading scan video',
+    signal,
   );
   onProgress?.(35);
 
@@ -113,6 +140,7 @@ export async function uploadScanVideoFile(
   let lastError: unknown;
 
   for (const delay of delays) {
+    assertNotAborted(signal);
     if (delay > 0) await sleep(delay);
     await refreshFirebaseToken(true);
 
@@ -128,6 +156,7 @@ export async function uploadScanVideoFile(
           }),
         UPLOAD_TIMEOUT_MS,
         'Uploading scan video',
+        signal,
       );
 
       if (error) throw error;

@@ -12,10 +12,8 @@ import { clearAppData, loadAppData, saveAppData } from '../lib/appStorage';
 import {
   completeScanRemote,
   createField,
-  createScan,
   fetchFieldData,
   migrateLocalFieldData,
-  updateScan,
 } from '../services/fieldData';
 import { fetchFarmProfile, saveFarmProfile } from '../services/profile';
 import { uploadScanVideoFile } from '../services/scanUpload';
@@ -118,6 +116,57 @@ function generateMockReportFromScan(field: Field, scan: Scan): Report {
   };
 }
 
+type CompletedScanPayload = {
+  scan: Scan;
+  report: Report;
+  next: AppDataState;
+  updatedField: Field;
+};
+
+function buildCompletedScanState(
+  current: AppDataState,
+  scanId: string,
+  analysis?: ScanAnalysisResult,
+): CompletedScanPayload | null {
+  const scan = current.scans.find((s) => s.id === scanId);
+  const field = current.fields.find((f) => f.id === scan?.fieldId);
+  if (!scan || !field) return null;
+
+  const completedAt = toIsoTimestamp(Date.now());
+  const completedScan: Scan = {
+    ...scan,
+    status: 'completed',
+    progress: 100,
+    completedAt,
+    weedCoverage: analysis?.weedCoverage ?? scan.weedCoverage ?? 18,
+    stressCoverage: analysis?.stressCoverage ?? scan.stressCoverage ?? 8,
+    healthScore: analysis?.healthScore ?? scan.healthScore ?? 82,
+  };
+  const report = analysis
+    ? buildReportFromAnalysis(field, completedScan, analysis)
+    : generateMockReportFromScan(field, completedScan);
+  const updatedField: Field = {
+    ...field,
+    healthScore: report.healthScore,
+    openIssues: report.findingsCount,
+    totalSavings: report.estimatedSavings,
+    lastScanDate: toIsoTimestamp(getScanRecordedAtMs(completedScan)),
+    status: report.severity,
+  };
+
+  return {
+    scan: completedScan,
+    report,
+    updatedField,
+    next: {
+      ...current,
+      scans: current.scans.map((s) => (s.id === scanId ? completedScan : s)),
+      reports: [...current.reports, report],
+      fields: current.fields.map((f) => (f.id === field.id ? updatedField : f)),
+    },
+  };
+}
+
 interface AppDataContextValue {
   loading: boolean;
   data: AppDataState;
@@ -132,16 +181,22 @@ interface AppDataContextValue {
   updateSettings: (patch: Partial<UserSettings>) => Promise<void>;
   updateCostAssumptions: (assumptions: CostAssumptions) => Promise<void>;
   startScan: (fieldId: string, capture?: ScanCapture) => Promise<Scan>;
-  uploadScanVideo: (scanId: string, onProgress?: (percent: number) => void) => Promise<Scan | null>;
+  uploadScanVideo: (
+    scanId: string,
+    onProgress?: (percent: number) => void,
+    signal?: AbortSignal,
+  ) => Promise<Scan | null>;
   analyzeScan: (
     scanId: string,
     onProgress?: (percent: number) => void,
+    signal?: AbortSignal,
   ) => Promise<{ scan: Scan; analysis: ScanAnalysisResult } | null>;
   advanceScanProgress: (scanId: string, progress: number, status?: Scan['status']) => Promise<Scan | null>;
   completeScan: (
     scanId: string,
     analysis?: ScanAnalysisResult,
   ) => Promise<{ scan: Scan; report: Report } | null>;
+  discardScan: (scanId: string) => Promise<void>;
   isAnalysisApiConfigured: boolean;
   getField: (id: string) => Field | undefined;
   getScan: (id: string) => Scan | undefined;
@@ -355,29 +410,6 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         gpsTrack: capture?.gpsTrack,
       };
 
-      if (user) {
-        try {
-          const saved = await createScan(user.uid, scan);
-          const merged = {
-            ...saved,
-            createdAt: scan.createdAt,
-            recordedAtMs: scan.recordedAtMs,
-            videoUri: scan.videoUri,
-            videoDurationSeconds: scan.videoDurationSeconds,
-            gpsTrack: scan.gpsTrack,
-          };
-          const next = { ...data, scans: [...data.scans, merged] };
-          await persist(next);
-          setSelectedScanId(merged.id);
-          setSelectedFieldId(fieldId);
-          return merged;
-        } catch (error) {
-          if (__DEV__) {
-            console.warn('[fieldData] create scan failed, saving locally', error);
-          }
-        }
-      }
-
       const next = { ...data, scans: [...data.scans, scan] };
       await persist(next);
       setSelectedScanId(scan.id);
@@ -396,29 +428,17 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         progress,
         status: status ?? scan.status,
       };
-      const scans = data.scans.map((s) => (s.id === scanId ? updated : s));
-
-      if (user) {
-        try {
-          const saved = await updateScan(user.uid, updated);
-          const next = { ...data, scans: data.scans.map((s) => (s.id === scanId ? saved : s)) };
-          await persist(next);
-          return saved;
-        } catch (error) {
-          if (__DEV__) {
-            console.warn('[fieldData] update scan failed, saving locally', error);
-          }
-        }
-      }
-
-      await persist({ ...data, scans });
+      await persist({
+        ...data,
+        scans: data.scans.map((s) => (s.id === scanId ? updated : s)),
+      });
       return updated;
     },
     [data, persist, user],
   );
 
   const uploadScanVideo = useCallback(
-    async (scanId: string, onProgress?: (percent: number) => void) => {
+    async (scanId: string, onProgress?: (percent: number) => void, signal?: AbortSignal) => {
       const scan = data.scans.find((s) => s.id === scanId);
       if (!scan?.videoUri) return scan ?? null;
       if (scan.videoUrl) return scan;
@@ -442,6 +462,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           scanId,
           scan.videoUri,
           mapUploadProgress,
+          signal,
         );
 
         const updated: Scan = {
@@ -451,20 +472,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           status: 'processing',
         };
 
-        const saved = await updateScan(user.uid, updated);
-        const merged = {
-          ...updated,
-          ...saved,
-          createdAt: scan.createdAt,
-          recordedAtMs: scan.recordedAtMs,
-          videoUri: scan.videoUri,
-        };
         const next = {
           ...data,
-          scans: data.scans.map((s) => (s.id === scanId ? merged : s)),
+          scans: data.scans.map((s) => (s.id === scanId ? updated : s)),
         };
         await persist(next);
-        return merged;
+        return updated;
       } catch (error) {
         if (__DEV__) {
           console.warn('[scanUpload] upload failed', error);
@@ -476,7 +489,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   );
 
   const analyzeScan = useCallback(
-    async (scanId: string, onProgress?: (percent: number) => void) => {
+    async (scanId: string, onProgress?: (percent: number) => void, signal?: AbortSignal) => {
       const scan = data.scans.find((s) => s.id === scanId);
       const field = data.fields.find((f) => f.id === scan?.fieldId);
       if (!scan || !field) return null;
@@ -485,7 +498,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         throw new Error('Sign in to analyze scans.');
       }
 
-      const analysis = await analyzeScanVideo(scan, field, user.uid, onProgress);
+      const analysis = await analyzeScanVideo(scan, field, user.uid, onProgress, signal);
       const updated: Scan = {
         ...scan,
         weedCoverage: analysis.weedCoverage,
@@ -501,14 +514,6 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       };
       await persist(next);
 
-      if (user) {
-        void updateScan(user.uid, updated).catch((error) => {
-          if (__DEV__) {
-            console.warn('[scanAnalysis] background scan sync failed', error);
-          }
-        });
-      }
-
       return { scan: updated, analysis };
     },
     [data, persist, user],
@@ -516,52 +521,62 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   const completeScan = useCallback(
     async (scanId: string, analysis?: ScanAnalysisResult) => {
-      const scan = data.scans.find((s) => s.id === scanId);
-      const field = data.fields.find((f) => f.id === scan?.fieldId);
-      if (!scan || !field) return null;
+      const completionRef: { value: CompletedScanPayload | null } = { value: null };
 
-      const completedAt = toIsoTimestamp(Date.now());
-      const completedScan: Scan = {
-        ...scan,
-        status: 'completed',
-        progress: 100,
-        completedAt,
-        weedCoverage: analysis?.weedCoverage ?? scan.weedCoverage ?? 18,
-        stressCoverage: analysis?.stressCoverage ?? scan.stressCoverage ?? 8,
-        healthScore: analysis?.healthScore ?? scan.healthScore ?? 82,
-      };
-      const report = analysis
-        ? buildReportFromAnalysis(field, completedScan, analysis)
-        : generateMockReportFromScan(field, completedScan);
-      const updatedField: Field = {
-        ...field,
-        healthScore: report.healthScore,
-        openIssues: report.findingsCount,
-        totalSavings: report.estimatedSavings,
-        lastScanDate: toIsoTimestamp(getScanRecordedAtMs(completedScan)),
-        status: report.severity,
-      };
-      const next = {
-        ...data,
-        scans: data.scans.map((s) => (s.id === scanId ? completedScan : s)),
-        reports: [...data.reports, report],
-        fields: data.fields.map((f) => (f.id === field.id ? updatedField : f)),
-      };
+      setData((current) => {
+        const built = buildCompletedScanState(current, scanId, analysis);
+        if (!built) return current;
+        completionRef.value = built;
+        return built.next;
+      });
 
-      await persist(next);
-      setSelectedReportId(report.id);
+      const completion = completionRef.value;
+      if (!completion) return null;
 
       if (user) {
-        void completeScanRemote(user.uid, completedScan, report, updatedField).catch((error) => {
+        await saveAppData(user.uid, completion.next);
+        try {
+          await completeScanRemote(user.uid, completion.scan, completion.report, completion.updatedField);
+        } catch (error) {
           if (__DEV__) {
-            console.warn('[fieldData] background complete scan sync failed', error);
+            console.warn('[fieldData] complete scan sync failed', error);
           }
-        });
+        }
       }
 
-      return { scan: completedScan, report };
+      setSelectedReportId(completion.report.id);
+      return { scan: completion.scan, report: completion.report };
     },
-    [data, persist, user],
+    [user],
+  );
+
+  const discardScan = useCallback(
+    async (scanId: string) => {
+      const nextRef: { value: AppDataState | null } = { value: null };
+
+      setData((current) => {
+        const scan = current.scans.find((s) => s.id === scanId);
+        if (!scan || scan.status === 'completed') return current;
+
+        const next = {
+          ...current,
+          scans: current.scans.filter((s) => s.id !== scanId),
+        };
+        nextRef.value = next;
+        return next;
+      });
+
+      if (!nextRef.value) return;
+
+      if (user) {
+        await saveAppData(user.uid, nextRef.value);
+      }
+
+      if (selectedScanId === scanId) {
+        setSelectedScanId(null);
+      }
+    },
+    [user, selectedScanId],
   );
 
   const getField = useCallback((id: string) => data.fields.find((f) => f.id === id), [data.fields]);
@@ -572,7 +587,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     [data.reports],
   );
   const getScansForField = useCallback(
-    (fieldId: string) => data.scans.filter((s) => s.fieldId === fieldId),
+    (fieldId: string) => data.scans.filter((s) => s.fieldId === fieldId && s.status === 'completed'),
     [data.scans],
   );
 
@@ -630,6 +645,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       analyzeScan,
       advanceScanProgress,
       completeScan,
+      discardScan,
       isAnalysisApiConfigured: isAnalysisApiConfigured(),
       getField,
       getScan,
@@ -656,6 +672,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       analyzeScan,
       advanceScanProgress,
       completeScan,
+      discardScan,
       getField,
       getScan,
       getReport,

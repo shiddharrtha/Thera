@@ -114,19 +114,36 @@ function buildAnalysisPayload(
   };
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string, signal?: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Scan cancelled.', 'AbortError'));
+    };
+
     const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
       reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`));
     }, ms);
+
+    if (signal) {
+      if (signal.aborted) {
+        clearTimeout(timer);
+        reject(new DOMException('Scan cancelled.', 'AbortError'));
+        return;
+      }
+      signal.addEventListener('abort', onAbort);
+    }
 
     promise.then(
       (value) => {
         clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
         resolve(value);
       },
       (error) => {
         clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
         reject(error);
       },
     );
@@ -151,7 +168,16 @@ async function readLocalVideoPayload(localUri: string): Promise<Blob> {
   return blob;
 }
 
+export function isScanCancelledError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (error instanceof Error && error.name === 'AbortError') return true;
+  return error instanceof Error && error.message === 'Scan cancelled.';
+}
+
 export function getScanAnalysisErrorMessage(error: unknown): string {
+  if (isScanCancelledError(error)) {
+    return 'Scan cancelled.';
+  }
   const message =
     error instanceof Error
       ? error.message
@@ -176,10 +202,15 @@ export async function analyzeScanVideo(
   field: Field,
   userId: string,
   onProgress?: (percent: number) => void,
+  signal?: AbortSignal,
 ): Promise<ScanAnalysisResult> {
   const baseUrl = getAnalysisApiUrl();
   if (!baseUrl) {
     throw new Error('Analysis API URL is not configured.');
+  }
+
+  if (signal?.aborted) {
+    throw new DOMException('Scan cancelled.', 'AbortError');
   }
 
   onProgress?.(5);
@@ -199,6 +230,7 @@ export async function analyzeScanVideo(
 
   const startHeartbeat = () => {
     heartbeat = setInterval(() => {
+      if (signal?.aborted) return;
       heartbeatProgress = Math.min(heartbeatProgress + 4, 84);
       onProgress?.(heartbeatProgress);
     }, 2000);
@@ -225,9 +257,11 @@ export async function analyzeScanVideo(
           method: 'POST',
           headers,
           body: formData,
+          signal,
         }),
         ANALYSIS_TIMEOUT_MS,
         'Scan analysis upload',
+        signal,
       );
     } else {
       onProgress?.(35);
@@ -240,13 +274,19 @@ export async function analyzeScanVideo(
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(payload),
+          signal,
         }),
         ANALYSIS_TIMEOUT_MS,
         'Scan analysis',
+        signal,
       );
     }
   } finally {
     stopHeartbeat();
+  }
+
+  if (signal?.aborted) {
+    throw new DOMException('Scan cancelled.', 'AbortError');
   }
 
   onProgress?.(85);
