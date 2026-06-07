@@ -8,8 +8,9 @@ import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
 export function SavingsScreen({ onNavigate }: ScreenProps) {
-  const { data, getSavingsSummary, hasCompletedScans } = useAppData();
+  const { data, getSavingsSummary, hasCompletedScans, getSelectedFarm } = useAppData();
   const savings = getSavingsSummary();
+  const selectedFarm = getSelectedFarm();
   const hasData = hasCompletedScans && savings.totalSavings > 0;
 
   if (!hasCompletedScans) {
@@ -34,7 +35,7 @@ export function SavingsScreen({ onNavigate }: ScreenProps) {
       <View style={styles.header}>
         <Text style={styles.title}>Savings Dashboard</Text>
         <Text style={styles.subtitle}>
-          {data.farmProfile?.farmName ?? 'Your farm'} · {new Date().getFullYear()} Season
+          {selectedFarm?.name ?? 'Your farm'} · {new Date().getFullYear()} Season
         </Text>
       </View>
 

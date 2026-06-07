@@ -30,15 +30,25 @@ function getFirstName(displayName?: string | null) {
 
 export function HomeScreen({ onNavigate }: ScreenProps) {
   const { user } = useAuth();
-  const { data, hasCompletedScans, getSavingsSummary, setSelectedFieldId, getScansForField } = useAppData();
+  const {
+    data,
+    hasCompletedScans,
+    getSavingsSummary,
+    setSelectedFieldId,
+    getScansForField,
+    getFieldsForSelectedFarm,
+    getSelectedFarm,
+  } = useAppData();
 
   const firstName = getFirstName(user?.displayName);
   const avatarInitial = firstName.charAt(0).toUpperCase();
-  const fields = data.fields;
+  const fields = getFieldsForSelectedFarm();
+  const selectedFarm = getSelectedFarm();
   const hasFields = fields.length > 0;
   const savings = getSavingsSummary();
   const totalAcres = fields.reduce((sum, f) => sum + f.acreage, 0);
-  const completedScans = data.scans.filter((s) => s.status === 'completed').length;
+  const fieldIds = new Set(fields.map((f) => f.id));
+  const completedScans = data.scans.filter((s) => s.status === 'completed' && fieldIds.has(s.fieldId)).length;
   const attentionFields = fields.filter((f) => f.status === 'warning' || f.status === 'critical');
 
   return (
@@ -48,6 +58,9 @@ export function HomeScreen({ onNavigate }: ScreenProps) {
           <View>
             <Text style={styles.greeting}>{getGreeting()}</Text>
             <Text style={styles.name}>{firstName}</Text>
+            {selectedFarm && (
+              <Text style={styles.farmLabel}>{selectedFarm.name}</Text>
+            )}
           </View>
           <View style={styles.headerActions}>
             <TouchableOpacity style={styles.bellBtn}>
@@ -248,6 +261,7 @@ const styles = createStyles({
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   greeting: { fontSize: 12, color: colors.gray400 },
   name: { fontSize: 24, fontWeight: '900', color: colors.gray900 },
+  farmLabel: { fontSize: 12, color: colors.gray400, marginTop: 2 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   bellBtn: { padding: 8, borderRadius: 20, backgroundColor: colors.background },
   avatar: {

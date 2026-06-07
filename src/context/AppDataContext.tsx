@@ -15,7 +15,17 @@ import {
   fetchFieldData,
   migrateLocalFieldData,
 } from '../services/fieldData';
-import { fetchFarmProfile, saveFarmProfile } from '../services/profile';
+import {
+  createFarmRemote,
+  fetchFarms,
+  fetchSelectedFarmId,
+  farmFromLegacyProfile,
+  farmFromProfile,
+  saveOnboardingFarm,
+  saveSelectedFarmId,
+  updateFarmRemote,
+} from '../services/farm';
+import { fetchFarmProfile } from '../services/profile';
 import { uploadScanVideoFile } from '../services/scanUpload';
 import {
   analyzeScanVideo,
@@ -25,6 +35,7 @@ import {
 import type {
   AppDataState,
   CostAssumptions,
+  Farm,
   FarmProfile,
   Field,
   Report,
@@ -33,6 +44,14 @@ import type {
   UserSettings,
 } from '../types/models';
 import { DEFAULT_SETTINGS, FREE_LIMITS } from '../types/models';
+import {
+  assignFieldsToFarm,
+  getFieldsForFarm,
+  getReportsForFarm,
+  getScansForFarm,
+  getSelectedFarm,
+  resolveSelectedFarmId,
+} from '../utils/farmHelpers';
 import { toIsoTimestamp, normalizeFieldTimestamps, normalizeScanTimestamps, getScanRecordedAtMs } from '../utils/timestamps';
 
 function createId(prefix: string) {
@@ -176,8 +195,15 @@ interface AppDataContextValue {
   setSelectedFieldId: (id: string | null) => void;
   setSelectedScanId: (id: string | null) => void;
   setSelectedReportId: (id: string | null) => void;
-  completeOnboarding: (profile: FarmProfile) => Promise<void>;
-  addField: (input: Omit<Field, 'id' | 'openIssues' | 'totalSavings' | 'status' | 'hasBoundary'> & { hasBoundary?: boolean }) => Promise<Field>;
+  completeOnboarding: (profile: FarmProfile) => Promise<Farm>;
+  addFarm: (profile: FarmProfile) => Promise<Farm>;
+  switchFarm: (farmId: string) => Promise<void>;
+  updateFarm: (farmId: string, patch: Partial<FarmProfile>) => Promise<void>;
+  /** @deprecated use updateFarm */
+  updateFarmProfile: (patch: Partial<FarmProfile>) => Promise<void>;
+  getSelectedFarm: () => Farm | undefined;
+  getFieldsForSelectedFarm: () => Field[];
+  addField: (input: Omit<Field, 'id' | 'farmId' | 'openIssues' | 'totalSavings' | 'status' | 'hasBoundary'> & { hasBoundary?: boolean }) => Promise<Field>;
   updateSettings: (patch: Partial<UserSettings>) => Promise<void>;
   updateCostAssumptions: (assumptions: CostAssumptions) => Promise<void>;
   startScan: (fieldId: string, capture?: ScanCapture) => Promise<Scan>;
@@ -216,7 +242,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<AppDataState>({
     onboardingComplete: false,
-    farmProfile: null,
+    farms: [],
+    selectedFarmId: null,
     fields: [],
     scans: [],
     reports: [],
@@ -232,7 +259,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     if (!user) {
       setData({
         onboardingComplete: false,
-        farmProfile: null,
+        farms: [],
+        selectedFarmId: null,
         fields: [],
         scans: [],
         reports: [],
@@ -250,14 +278,32 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     loadAppData(user.uid)
       .then(async (local) => {
-        let farmProfile = local.farmProfile;
+        let farms = local.farms;
+        let selectedFarmId = local.selectedFarmId;
         let onboardingComplete = local.onboardingComplete;
 
-        if (!local.onboardingComplete || !local.farmProfile) {
+        if (farms.length === 0 && local.farmProfile) {
+          farms = [farmFromLegacyProfile(user.uid, local.farmProfile)];
+          selectedFarmId = farms[0].id;
+          onboardingComplete = true;
+        }
+
+        try {
+          const remoteFarms = await fetchFarms(user.uid);
+          if (remoteFarms.length > 0) {
+            farms = remoteFarms;
+          }
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[farm] fetch farms failed', error);
+          }
+        }
+
+        if (farms.length === 0) {
           try {
             const remote = await fetchFarmProfile(user.uid);
             if (remote.onboardingComplete && remote.farmProfile) {
-              farmProfile = remote.farmProfile;
+              farms = [farmFromLegacyProfile(user.uid, remote.farmProfile)];
               onboardingComplete = true;
             }
           } catch (error) {
@@ -266,6 +312,19 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
             }
           }
         }
+
+        try {
+          const remoteSelectedFarmId = await fetchSelectedFarmId(user.uid);
+          if (remoteSelectedFarmId && farms.some((farm) => farm.id === remoteSelectedFarmId)) {
+            selectedFarmId = remoteSelectedFarmId;
+          }
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[farm] fetch selected farm failed', error);
+          }
+        }
+
+        selectedFarmId = resolveSelectedFarmId(farms, selectedFarmId);
 
         let fields = local.fields;
         let scans = local.scans;
@@ -295,12 +354,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        if (onboardingComplete && farmProfile) {
-          saveFarmProfile(user, farmProfile, displayName).catch((error) => {
-            if (__DEV__) {
-              console.warn('[profile] background farm profile sync failed', error);
-            }
-          });
+        if (selectedFarmId) {
+          fields = assignFieldsToFarm(fields, selectedFarmId);
         }
 
         scans = normalizeScanTimestamps(scans);
@@ -308,7 +363,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
         const merged = {
           ...local,
-          farmProfile,
+          farms,
+          selectedFarmId,
           onboardingComplete,
           fields: normalizeFieldTimestamps(fields, scans),
           scans,
@@ -331,23 +387,147 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   const completeOnboarding = useCallback(
     async (profile: FarmProfile) => {
-      const next = { ...data, farmProfile: profile, onboardingComplete: true };
-      await persist(next);
+      const farmId = createId('farm');
+      let farm = farmFromProfile(profile, farmId);
+
       if (user) {
-        await saveFarmProfile(user, profile, displayName);
+        try {
+          farm = await createFarmRemote(user, farm);
+          await saveOnboardingFarm(user, farm, displayName);
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[farm] complete onboarding sync failed', error);
+          }
+        }
       }
+
+      const next = {
+        ...data,
+        farms: [farm],
+        selectedFarmId: farm.id,
+        onboardingComplete: true,
+      };
+      await persist(next);
+      return farm;
     },
     [data, persist, user, displayName],
   );
 
+  const addFarm = useCallback(
+    async (profile: FarmProfile) => {
+      const farmId = createId('farm');
+      let farm = farmFromProfile(profile, farmId);
+
+      if (user) {
+        try {
+          farm = await createFarmRemote(user, farm);
+          await saveSelectedFarmId(user, farm.id);
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[farm] add farm sync failed', error);
+          }
+          throw error;
+        }
+      }
+
+      const next = {
+        ...data,
+        farms: [...data.farms, farm],
+        selectedFarmId: farm.id,
+        onboardingComplete: true,
+      };
+      await persist(next);
+      setSelectedFieldId(null);
+      setSelectedScanId(null);
+      setSelectedReportId(null);
+      return farm;
+    },
+    [data, persist, user],
+  );
+
+  const switchFarm = useCallback(
+    async (farmId: string) => {
+      if (!data.farms.some((farm) => farm.id === farmId)) return;
+
+      const next = { ...data, selectedFarmId: farmId };
+      await persist(next);
+      setSelectedFieldId(null);
+      setSelectedScanId(null);
+      setSelectedReportId(null);
+
+      if (user) {
+        try {
+          await saveSelectedFarmId(user, farmId);
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[farm] save selected farm failed', error);
+          }
+        }
+      }
+    },
+    [data, persist, user],
+  );
+
+  const updateFarm = useCallback(
+    async (farmId: string, patch: Partial<FarmProfile>) => {
+      const existing = data.farms.find((farm) => farm.id === farmId);
+      if (!existing) return;
+
+      let updated: Farm = {
+        ...existing,
+        name: patch.farmName?.trim() ?? existing.name,
+        region: patch.region ?? existing.region,
+        defaultCrop: patch.defaultCrop ?? existing.defaultCrop,
+        units: patch.units ?? existing.units,
+        approximateAcres: patch.approximateAcres ?? existing.approximateAcres,
+      };
+
+      if (user) {
+        try {
+          updated = await updateFarmRemote(user, updated);
+          if (data.selectedFarmId === farmId) {
+            await saveOnboardingFarm(user, updated, displayName);
+          }
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[farm] update farm sync failed', error);
+          }
+          throw error;
+        }
+      }
+
+      const next = {
+        ...data,
+        farms: data.farms.map((farm) => (farm.id === farmId ? updated : farm)),
+      };
+      await persist(next);
+    },
+    [data, persist, user, displayName],
+  );
+
+  const updateFarmProfile = useCallback(
+    async (patch: Partial<FarmProfile>) => {
+      const farmId = resolveSelectedFarmId(data.farms, data.selectedFarmId);
+      if (!farmId) return;
+      await updateFarm(farmId, patch);
+    },
+    [data.farms, data.selectedFarmId, updateFarm],
+  );
+
   const addField = useCallback(
     async (
-      input: Omit<Field, 'id' | 'openIssues' | 'totalSavings' | 'status' | 'hasBoundary'> & {
+      input: Omit<Field, 'id' | 'farmId' | 'openIssues' | 'totalSavings' | 'status' | 'hasBoundary'> & {
         hasBoundary?: boolean;
       },
     ) => {
+      const farmId = resolveSelectedFarmId(data.farms, data.selectedFarmId);
+      if (!farmId) {
+        throw new Error('Select a farm before adding a field.');
+      }
+
       const field: Field = {
         id: createId('field'),
+        farmId,
         name: input.name,
         cropType: input.cropType,
         acreage: input.acreage,
@@ -579,6 +759,16 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     [user, selectedScanId],
   );
 
+  const getSelectedFarmFn = useCallback(
+    () => getSelectedFarm(data.farms, data.selectedFarmId),
+    [data.farms, data.selectedFarmId],
+  );
+
+  const getFieldsForSelectedFarm = useCallback(
+    () => getFieldsForFarm(data.fields, data.selectedFarmId),
+    [data.fields, data.selectedFarmId],
+  );
+
   const getField = useCallback((id: string) => data.fields.find((f) => f.id === id), [data.fields]);
   const getScan = useCallback((id: string) => data.scans.find((s) => s.id === id), [data.scans]);
   const getReport = useCallback((id: string) => data.reports.find((r) => r.id === id), [data.reports]);
@@ -593,32 +783,38 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   const getUsage = useCallback(() => {
     const isPro = data.subscription.planId !== 'free';
+    const farmFields = getFieldsForFarm(data.fields, data.selectedFarmId);
+    const farmScans = getScansForFarm(data.scans, data.fields, data.selectedFarmId);
+    const farmReports = getReportsForFarm(data.reports, data.fields, data.selectedFarmId);
+
     return {
-      scansUsed: data.scans.filter((s) => s.status === 'completed').length,
+      scansUsed: farmScans.filter((s) => s.status === 'completed').length,
       scansLimit: isPro ? 'unlimited' as const : FREE_LIMITS.scans,
-      fieldsUsed: data.fields.length,
+      fieldsUsed: farmFields.length,
       fieldsLimit: isPro ? 'unlimited' as const : FREE_LIMITS.fields,
-      reportsUsed: data.reports.length,
+      reportsUsed: farmReports.length,
       reportsLimit: isPro ? 'unlimited' as const : FREE_LIMITS.reports,
     };
   }, [data]);
 
   const getSavingsSummary = useCallback(() => {
-    const totalSavings = data.fields.reduce((sum, f) => sum + f.totalSavings, 0);
-    const totalAcres = data.fields.reduce((sum, f) => sum + f.acreage, 0);
-    const sprayAcres = data.reports.reduce((sum, r) => sum + r.recommendedSprayAcres, 0);
+    const farmFields = getFieldsForFarm(data.fields, data.selectedFarmId);
+    const farmReports = getReportsForFarm(data.reports, data.fields, data.selectedFarmId);
+    const totalSavings = farmFields.reduce((sum, f) => sum + f.totalSavings, 0);
+    const totalAcres = farmFields.reduce((sum, f) => sum + f.acreage, 0);
+    const sprayAcres = farmReports.reduce((sum, r) => sum + r.recommendedSprayAcres, 0);
     const sprayAreaAvoided = Math.max(0, totalAcres - sprayAcres);
-    const avgReduction = data.reports.length > 0
-      ? Math.round(data.reports.reduce((sum, r) => sum + r.chemicalReductionPercent, 0) / data.reports.length)
+    const avgReduction = farmReports.length > 0
+      ? Math.round(farmReports.reduce((sum, r) => sum + r.chemicalReductionPercent, 0) / farmReports.length)
       : null;
     const costReduction = avgReduction;
     return { totalSavings, sprayAreaAvoided, avgReduction, costReduction };
   }, [data]);
 
-  const hasCompletedScans = useMemo(
-    () => data.scans.some((s) => s.status === 'completed'),
-    [data.scans],
-  );
+  const hasCompletedScans = useMemo(() => {
+    const farmScans = getScansForFarm(data.scans, data.fields, data.selectedFarmId);
+    return farmScans.some((s) => s.status === 'completed');
+  }, [data]);
 
   const resetForSignOut = useCallback(() => {
     setSelectedFieldId(null);
@@ -637,6 +833,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       setSelectedScanId,
       setSelectedReportId,
       completeOnboarding,
+      addFarm,
+      switchFarm,
+      updateFarm,
+      updateFarmProfile,
+      getSelectedFarm: getSelectedFarmFn,
+      getFieldsForSelectedFarm,
       addField,
       updateSettings,
       updateCostAssumptions,
@@ -664,6 +866,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       selectedScanId,
       selectedReportId,
       completeOnboarding,
+      addFarm,
+      switchFarm,
+      updateFarm,
+      updateFarmProfile,
+      getSelectedFarmFn,
+      getFieldsForSelectedFarm,
       addField,
       updateSettings,
       updateCostAssumptions,

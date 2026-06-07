@@ -14,6 +14,16 @@ export interface FarmProfile {
   approximateAcres: number;
 }
 
+export interface Farm {
+  id: string;
+  name: string;
+  region: string;
+  defaultCrop: string;
+  units: Units;
+  approximateAcres: number;
+  createdAt?: string;
+}
+
 export interface UserSettings {
   scanCompletedNotifications: boolean;
   fieldAlerts: boolean;
@@ -46,6 +56,7 @@ export interface CostAssumptions {
 
 export interface Field {
   id: string;
+  farmId: string;
   name: string;
   cropType: string;
   acreage: number;
@@ -130,7 +141,10 @@ export interface Report {
 
 export interface AppDataState {
   onboardingComplete: boolean;
-  farmProfile: FarmProfile | null;
+  /** @deprecated migrated to farms[] — may exist in old local storage */
+  farmProfile?: FarmProfile | null;
+  farms: Farm[];
+  selectedFarmId: string | null;
   fields: Field[];
   scans: Scan[];
   reports: Report[];

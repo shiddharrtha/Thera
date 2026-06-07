@@ -69,6 +69,7 @@ function parseLastScanAt(lastScanDate?: string): string | null {
 type FieldRow = {
   id: string;
   user_id: string;
+  farm_id: string | null;
   name: string;
   crop_type: string;
   acreage: number;
@@ -120,6 +121,7 @@ type ReportRow = {
 function rowToField(row: FieldRow): Field {
   return {
     id: row.id,
+    farmId: row.farm_id ?? '',
     name: row.name,
     cropType: row.crop_type,
     acreage: Number(row.acreage),
@@ -138,6 +140,7 @@ function fieldToRow(field: Field, userId: string): FieldRow {
   return {
     id: field.id,
     user_id: userId,
+    farm_id: field.farmId,
     name: field.name,
     crop_type: field.cropType,
     acreage: field.acreage,

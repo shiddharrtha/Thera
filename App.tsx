@@ -4,7 +4,7 @@ import { ensureFirebaseInitialized } from './src/lib/firebase';
 import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import type { Screen, NavTab } from './src/types/navigation';
+import type { Screen, NavTab, NavigateOptions } from './src/types/navigation';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { AppDataProvider, useAppData } from './src/context/AppDataContext';
 import { BottomNav } from './src/components/BottomNav';
@@ -13,6 +13,7 @@ import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
 import { ForgotPasswordScreen } from './src/screens/ForgotPasswordScreen';
 import { FarmSetupScreen } from './src/screens/FarmSetupScreen';
+import { AddFarmScreen } from './src/screens/AddFarmScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { ScanScreen } from './src/screens/ScanScreen';
 import { ProcessingScreen } from './src/screens/ProcessingScreen';
@@ -101,7 +102,7 @@ function AppNavigator() {
     });
   }, [user, authLoading, dataLoading, data.onboardingComplete, resetForSignOut]);
 
-  const navigate = (s: Screen) => {
+  const navigate = (s: Screen, options?: NavigateOptions) => {
     if (!user && !AUTH_SCREENS.includes(s)) return;
 
     if (user && screen === 'splash' && s === 'login') {
@@ -128,7 +129,7 @@ function AppNavigator() {
     if (user && (s === 'home' || s === 'setup')) {
       setHistory([]);
       setActiveTab('home');
-      setScreen(s === 'setup' || !data.onboardingComplete ? 'setup' : 'home');
+      setScreen(s === 'setup' || !data.onboardingComplete || data.farms.length === 0 ? 'setup' : 'home');
       return;
     }
 
@@ -136,6 +137,11 @@ function AppNavigator() {
 
     const tab = SCREEN_TO_TAB[s];
     if (tab) setActiveTab(tab);
+
+    if (options?.replace) {
+      setScreen(s);
+      return;
+    }
 
     setHistory((h) => [...h, screen]);
     setScreen(s);
@@ -197,6 +203,8 @@ function AppNavigator() {
         return <FieldDetailScreen {...screenProps} />;
       case 'settings':
         return <SettingsScreen {...screenProps} />;
+      case 'add-farm':
+        return <AddFarmScreen {...screenProps} />;
       case 'billing':
         return <BillingScreen {...screenProps} />;
     }

@@ -8,6 +8,7 @@ import {
   Platform,
   Alert,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
 import { useAppData } from '../context/AppDataContext';
@@ -24,8 +25,8 @@ import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 import type { Units } from '../types/models';
 
-export function FarmSetupScreen({ onNavigate }: ScreenProps) {
-  const { completeOnboarding } = useAppData();
+export function AddFarmScreen({ onNavigate, onBack }: ScreenProps) {
+  const { addFarm } = useAppData();
   const [farmName, setFarmName] = useState('');
   const [regionSelection, setRegionSelection] = useState<RegionOption>('Iowa');
   const [otherRegion, setOtherRegion] = useState('');
@@ -50,25 +51,16 @@ export function FarmSetupScreen({ onNavigate }: ScreenProps) {
 
     setBusy(true);
     try {
-      await completeOnboarding({
+      await addFarm({
         farmName: farmName.trim() || 'My Farm',
         region,
         defaultCrop,
         units,
         approximateAcres: Number(approxAcres) || 0,
       });
-      onNavigate('home');
+      onNavigate('home', { replace: true });
     } catch (error) {
-      const message = getFarmSaveErrorMessage(error);
-      if (message.includes('db:migrate-farms') || message.includes('Farms table is missing')) {
-        Alert.alert(
-          'Saved on this device',
-          `${message}\n\nYour farm profile is saved locally. After running the migration, reopen the app to sync to Supabase.`,
-          [{ text: 'Continue', onPress: () => onNavigate('home') }],
-        );
-        return;
-      }
-      Alert.alert('Could not save farm profile', message);
+      Alert.alert('Could not add farm', getFarmSaveErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -80,8 +72,15 @@ export function FarmSetupScreen({ onNavigate }: ScreenProps) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={styles.header}>
-        <Text style={styles.stepLabel}>Farm Profile</Text>
-        <Text style={styles.title}>Set up your farm</Text>
+        <View style={styles.headerRow}>
+          <TouchableOpacity style={styles.backBtn} onPress={onBack}>
+            <Ionicons name="chevron-back" size={18} color={colors.gray700} />
+          </TouchableOpacity>
+          <View>
+            <Text style={styles.stepLabel}>New Farm</Text>
+            <Text style={styles.title}>Set up your farm</Text>
+          </View>
+        </View>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
@@ -159,7 +158,7 @@ export function FarmSetupScreen({ onNavigate }: ScreenProps) {
       <View style={styles.footer}>
         <TouchableOpacity style={styles.nextWrap} onPress={finishSetup} disabled={busy}>
           <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.nextBtn}>
-            <Text style={styles.nextBtnText}>{busy ? 'Saving…' : 'Continue'}</Text>
+            <Text style={styles.nextBtnText}>{busy ? 'Creating…' : 'Create Farm'}</Text>
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -177,6 +176,8 @@ const styles = createStyles({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  backBtn: { padding: 6, borderRadius: 12, backgroundColor: colors.background },
   stepLabel: { fontSize: 11, fontWeight: '600', color: colors.primary, marginBottom: 4 },
   title: { fontSize: 22, fontWeight: '900', color: colors.gray900 },
   scroll: { flex: 1 },

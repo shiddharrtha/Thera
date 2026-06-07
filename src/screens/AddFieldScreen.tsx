@@ -13,23 +13,45 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
 import { useAppData } from '../context/AppDataContext';
 import { FloatingInput } from '../components/FloatingInput';
+import {
+  CROP_OPTIONS,
+  REGION_OPTIONS,
+  resolveChipSelection,
+  resolveChipValue,
+  type CropOption,
+  type RegionOption,
+} from '../constants/farmFormOptions';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
-const CROPS = ['Soybean', 'Corn', 'Wheat', 'Cotton', 'Other'];
-
 export function AddFieldScreen({ onNavigate, onBack }: ScreenProps) {
-  const { addField, data, setSelectedFieldId } = useAppData();
+  const { addField, setSelectedFieldId, getSelectedFarm } = useAppData();
+  const selectedFarm = getSelectedFarm();
+  const initialCrop = resolveChipSelection(CROP_OPTIONS, selectedFarm?.defaultCrop, 'Soybean');
+  const initialRegion = resolveChipSelection(REGION_OPTIONS, selectedFarm?.region, 'Iowa');
   const [name, setName] = useState('');
-  const [cropType, setCropType] = useState(data.farmProfile?.defaultCrop ?? 'Soybean');
+  const [cropSelection, setCropSelection] = useState<CropOption>(initialCrop.selection);
+  const [otherCropType, setOtherCropType] = useState(initialCrop.other);
+  const [regionSelection, setRegionSelection] = useState<RegionOption>(initialRegion.selection);
+  const [otherRegion, setOtherRegion] = useState(initialRegion.other);
   const [acreage, setAcreage] = useState('');
-  const [location, setLocation] = useState(data.farmProfile?.region ?? '');
   const [plantingDate, setPlantingDate] = useState('');
   const [busy, setBusy] = useState(false);
 
   const handleSave = async () => {
+    const cropType = resolveChipValue(cropSelection, otherCropType);
+    const location = resolveChipValue(regionSelection, otherRegion);
+
     if (!name.trim() || !acreage) {
       Alert.alert('Missing information', 'Please enter a field name and acreage.');
+      return;
+    }
+    if (cropSelection === 'Other' && !cropType) {
+      Alert.alert('Missing information', 'Please enter the crop type.');
+      return;
+    }
+    if (regionSelection === 'Other' && !location) {
+      Alert.alert('Missing information', 'Please enter the location.');
       return;
     }
     setBusy(true);
@@ -38,12 +60,12 @@ export function AddFieldScreen({ onNavigate, onBack }: ScreenProps) {
         name: name.trim(),
         cropType,
         acreage: Number(acreage),
-        location: location.trim() || undefined,
+        location: location || undefined,
         plantingDate: plantingDate.trim() || undefined,
         hasBoundary: false,
       });
       setSelectedFieldId(field.id);
-      onNavigate('field-detail');
+      onNavigate('field-detail', { replace: true });
     } finally {
       setBusy(false);
     }
@@ -65,18 +87,53 @@ export function AddFieldScreen({ onNavigate, onBack }: ScreenProps) {
         <FloatingInput label="Field name" value={name} onChange={setName} />
         <Text style={styles.label}>Crop type</Text>
         <View style={styles.chipRow}>
-          {CROPS.map((c) => (
+          {CROP_OPTIONS.map((c) => (
             <TouchableOpacity
               key={c}
-              style={[styles.chip, cropType === c && styles.chipActive]}
-              onPress={() => setCropType(c)}
+              style={[styles.chip, cropSelection === c && styles.chipActive]}
+              onPress={() => {
+                setCropSelection(c);
+                if (c !== 'Other') setOtherCropType('');
+              }}
             >
-              <Text style={[styles.chipText, cropType === c && styles.chipTextActive]}>{c}</Text>
+              <Text style={[styles.chipText, cropSelection === c && styles.chipTextActive]}>{c}</Text>
             </TouchableOpacity>
           ))}
         </View>
+        {cropSelection === 'Other' && (
+          <FloatingInput
+            label="Specify crop type"
+            value={otherCropType}
+            onChange={setOtherCropType}
+            placeholder="e.g. Alfalfa, Rice, Sorghum"
+            autoCapitalize="words"
+          />
+        )}
+        <Text style={styles.label}>Location</Text>
+        <View style={styles.chipRow}>
+          {REGION_OPTIONS.map((r) => (
+            <TouchableOpacity
+              key={r}
+              style={[styles.chip, regionSelection === r && styles.chipActive]}
+              onPress={() => {
+                setRegionSelection(r);
+                if (r !== 'Other') setOtherRegion('');
+              }}
+            >
+              <Text style={[styles.chipText, regionSelection === r && styles.chipTextActive]}>{r}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        {regionSelection === 'Other' && (
+          <FloatingInput
+            label="Specify location"
+            value={otherRegion}
+            onChange={setOtherRegion}
+            placeholder="e.g. Kansas, Ontario"
+            autoCapitalize="words"
+          />
+        )}
         <FloatingInput label="Acreage" value={acreage} onChange={setAcreage} keyboardType="numeric" />
-        <FloatingInput label="Location (optional)" value={location} onChange={setLocation} />
         <FloatingInput
           label="Planting date (optional)"
           value={plantingDate}

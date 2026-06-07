@@ -16,9 +16,11 @@ const STATUS_CONFIG: Record<FieldStatus, { label: string; bg: string; text: stri
   critical: { label: 'Critical', bg: '#FEE2E2', text: '#DC2626' },
 };
 
+import { getReportsForFarm } from '../utils/farmHelpers';
+
 export function ReportsListScreen({ onNavigate }: ScreenProps) {
   const { data, getField, setSelectedReportId } = useAppData();
-  const reports = [...data.reports].sort(
+  const reports = getReportsForFarm(data.reports, data.fields, data.selectedFarmId).sort(
     (a, b) => parseApiTimestamp(b.createdAt) - parseApiTimestamp(a.createdAt),
   );
 

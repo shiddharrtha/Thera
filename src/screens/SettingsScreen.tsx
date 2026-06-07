@@ -7,17 +7,17 @@ import { useAuth } from '../context/AuthContext';
 import { useAppData } from '../context/AppDataContext';
 import { getAuthErrorMessage } from '../services/auth';
 import { getFirstName, getNameInitial } from '../lib/userName';
+import { AccountProfileModal } from '../components/AccountProfileModal';
+import { FarmProfileFieldModal, type FarmProfileEditField } from '../components/FarmProfileFieldModal';
+import { farmToProfile } from '../utils/farmHelpers';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
-function Toggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) {
+function Toggle({ enabled }: { enabled: boolean }) {
   return (
-    <TouchableOpacity
-      onPress={onToggle}
-      style={[styles.toggle, { backgroundColor: enabled ? colors.primary : '#D1D5DB' }]}
-    >
+    <View style={[styles.toggle, { backgroundColor: enabled ? colors.primary : '#D1D5DB' }]}>
       <View style={[styles.toggleKnob, { left: enabled ? 22 : 2 }]} />
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -47,8 +47,9 @@ function SettingsRow({
   return (
     <TouchableOpacity
       style={[styles.row, !last && styles.rowBorder]}
-      onPress={toggle ? toggle.onToggle : onPress}
-      disabled={!!toggle}
+      onPress={toggle ? () => void toggle.onToggle() : onPress}
+      disabled={!toggle && !onPress}
+      activeOpacity={toggle || onPress ? 0.7 : 1}
     >
       <View style={[styles.rowIcon, { backgroundColor: danger ? '#FEE2E2' : iconBg }]}>
         <Ionicons name={icon} size={15} color={danger ? '#DC2626' : iconColor} />
@@ -59,9 +60,9 @@ function SettingsRow({
       </View>
       {value && !toggle && <Text style={styles.rowValue}>{value}</Text>}
       {toggle ? (
-        <Toggle enabled={toggle.enabled} onToggle={toggle.onToggle} />
+        <Toggle enabled={toggle.enabled} />
       ) : (
-        !danger && <Ionicons name="chevron-forward" size={15} color="#D1D5DB" />
+        !danger && onPress && <Ionicons name="chevron-forward" size={15} color="#D1D5DB" />
       )}
     </TouchableOpacity>
   );
@@ -77,12 +78,28 @@ function Section({ title, children }: { title?: string; children: React.ReactNod
 }
 
 export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
-  const { user, displayName, signOut } = useAuth();
-  const { data, updateSettings } = useAppData();
+  const { user, displayName, signOut, updateDisplayName } = useAuth();
+  const { data, updateSettings, updateFarmProfile, getSelectedFarm, switchFarm } = useAppData();
   const settings = data.settings;
-  const farm = data.farmProfile;
+  const selectedFarm = getSelectedFarm();
+  const farm = selectedFarm ? farmToProfile(selectedFarm) : null;
   const planLabel = data.subscription.planId === 'free' ? 'Free Basic' : data.subscription.planId === 'pro' ? 'Pro Plan' : 'Enterprise';
   const [signingOut, setSigningOut] = useState(false);
+  const [editField, setEditField] = useState<FarmProfileEditField | null>(null);
+  const [accountEditorOpen, setAccountEditorOpen] = useState(false);
+
+  const openFarmEditor = (field: FarmProfileEditField) => {
+    if (!farm) {
+      Alert.alert('Farm profile unavailable', 'Complete farm setup before editing these settings.');
+      return;
+    }
+    setEditField(field);
+  };
+
+  const formatAcreage = (acres?: number) => {
+    if (!acres || acres <= 0) return 'Not set';
+    return `${acres.toLocaleString()} ac`;
+  };
 
   const resolvedName = displayName || getFirstName(null, user?.email) || 'Thera User';
   const email = user?.email ?? '';
@@ -99,6 +116,18 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
     }
   };
 
+  const handleSaveAccountProfile = async (values: {
+    fullName: string;
+    farmName: string;
+    region: string;
+  }) => {
+    await updateDisplayName(values.fullName);
+    await updateFarmProfile({
+      farmName: values.farmName,
+      region: values.region,
+    });
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -112,7 +141,7 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-        <TouchableOpacity style={styles.profileCard}>
+        <TouchableOpacity style={styles.profileCard} onPress={() => setAccountEditorOpen(true)}>
           <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.avatar}>
             <Text style={styles.avatarText}>{avatarInitial}</Text>
           </LinearGradient>
@@ -132,15 +161,66 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
           <Ionicons name="chevron-forward" size={16} color="#D1D5DB" />
         </TouchableOpacity>
 
-        <Section title="ACCOUNT">
-          <SettingsRow icon="person" label="Personal Info" sub="Name, email, profile photo" />
-          <SettingsRow icon="people" iconBg="#EFF6FF" iconColor="#3B82F6" label="Team Members" sub="2 members on your farm" value="Manage" />
-          <SettingsRow icon="shield-checkmark" iconBg="#F5F3FF" iconColor="#7C3AED" label="Security" sub="Password, two-factor authentication" last />
+        <Section title="FARMS">
+          {data.farms.map((item) => {
+            const isActive = item.id === data.selectedFarmId;
+            return (
+              <SettingsRow
+                key={item.id}
+                icon="business"
+                iconBg="#F5F3FF"
+                iconColor="#7C3AED"
+                label={item.name}
+                sub={`${item.region} · ${item.defaultCrop}`}
+                value={isActive ? 'Active' : undefined}
+                onPress={
+                  isActive
+                    ? undefined
+                    : () => {
+                        void switchFarm(item.id).then(() => onNavigate('home', { replace: true }));
+                      }
+                }
+                last={false}
+              />
+            );
+          })}
+          <SettingsRow
+            icon="add-circle"
+            iconBg="#ECFDF5"
+            iconColor="#059669"
+            label="Add Farm"
+            sub="Set up a new farm profile"
+            onPress={() => onNavigate('add-farm')}
+            last
+          />
         </Section>
 
         <Section title="FARM & CROPS">
-          <SettingsRow icon="leaf" label="Default Crop Type" sub="Used for new field reports" value={farm?.defaultCrop ?? 'Not set'} />
-          <SettingsRow icon="location" iconBg="#FEF3C7" iconColor="#D97706" label="Primary Region" sub="Affects weather & alerts" value={farm?.region ?? 'Not set'} />
+          <SettingsRow
+            icon="leaf"
+            label="Default Crop Type"
+            sub="Used for new field reports"
+            value={farm?.defaultCrop ?? 'Not set'}
+            onPress={() => openFarmEditor('crop')}
+          />
+          <SettingsRow
+            icon="location"
+            iconBg="#FEF3C7"
+            iconColor="#D97706"
+            label="Primary Region"
+            sub="Affects weather & alerts"
+            value={farm?.region ?? 'Not set'}
+            onPress={() => openFarmEditor('region')}
+          />
+          <SettingsRow
+            icon="resize"
+            iconBg="#ECFDF5"
+            iconColor="#059669"
+            label="Acreage"
+            sub="Total farm acreage"
+            value={formatAcreage(farm?.approximateAcres)}
+            onPress={() => openFarmEditor('acreage')}
+          />
           <SettingsRow
             icon="globe"
             iconBg="#EFF6FF"
@@ -148,7 +228,12 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
             label="Units"
             sub="Measurement system"
             value={farm?.units === 'metric' ? 'Metric (ha, m)' : 'Imperial (ac, ft)'}
-            onPress={() => {}}
+            onPress={() => {
+              if (!farm) return;
+              void updateFarmProfile({
+                units: farm.units === 'metric' ? 'imperial' : 'metric',
+              });
+            }}
             last
           />
         </Section>
@@ -158,10 +243,6 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
           <SettingsRow icon="notifications" iconBg="#FEE2E2" iconColor="#DC2626" label="Field alerts" sub="Weed & stress threshold alerts" toggle={{ enabled: settings.fieldAlerts, onToggle: () => updateSettings({ fieldAlerts: !settings.fieldAlerts }) }} />
           <SettingsRow icon="notifications" iconBg="#EFF6FF" iconColor="#3B82F6" label="Weekly digest" sub="Field summary every Monday" toggle={{ enabled: settings.weeklyDigest, onToggle: () => updateSettings({ weeklyDigest: !settings.weeklyDigest }) }} />
           <SettingsRow icon="notifications" label="Tips & best practices" sub="Agronomy advice from Thera" toggle={{ enabled: settings.tipsAndBestPractices, onToggle: () => updateSettings({ tipsAndBestPractices: !settings.tipsAndBestPractices }) }} last />
-        </Section>
-
-        <Section title="APPEARANCE">
-          <SettingsRow icon="moon" iconBg="#F5F3FF" iconColor="#7C3AED" label="Dark Mode" sub="Easy on the eyes at night" toggle={{ enabled: settings.darkMode, onToggle: () => updateSettings({ darkMode: !settings.darkMode }) }} last />
         </Section>
 
         <Section title="PLAN & BILLING">
@@ -187,6 +268,25 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
 
         <Text style={styles.version}>Thera · Version 1.4.2 · Build 2026.05</Text>
       </ScrollView>
+
+      {farm && (
+        <FarmProfileFieldModal
+          visible={editField !== null}
+          field={editField}
+          farm={farm}
+          onClose={() => setEditField(null)}
+          onSave={updateFarmProfile}
+        />
+      )}
+
+      <AccountProfileModal
+        visible={accountEditorOpen}
+        fullName={resolvedName}
+        email={email}
+        farm={farm}
+        onClose={() => setAccountEditorOpen(false)}
+        onSave={handleSaveAccountProfile}
+      />
     </View>
   );
 }

@@ -10,6 +10,7 @@ interface AuthContextValue {
   busy: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, fullName: string) => Promise<void>;
+  updateDisplayName: (fullName: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -101,6 +102,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } finally {
           setBusy(false);
         }
+      },
+      updateDisplayName: async (fullName) => {
+        if (!user) {
+          throw new Error('You must be signed in to update your profile.');
+        }
+        const current = await authService.updateDisplayName(user, fullName);
+        setUser(current);
+        setDisplayName(fullName.trim());
       },
       signOut: authService.signOut,
     }),

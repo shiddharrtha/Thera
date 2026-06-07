@@ -43,6 +43,7 @@
     "web": "expo start --web",
     "email:setup": "node scripts/setup-resend-email.mjs",
     "db:migrate-farm-profile": "node scripts/apply-farm-profile-migration.mjs",
+    "db:migrate-farms": "node scripts/apply-farms-migration.mjs",
     "db:migrate-fields-scans": "node scripts/apply-fields-scans-migration.mjs",
     "db:migrate-scan-video": "node scripts/apply-scan-video-migration.mjs",
     "db:migrate-recorded-at-ms": "node scripts/apply-recorded-at-ms-migration.mjs",

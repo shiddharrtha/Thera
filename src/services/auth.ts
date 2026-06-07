@@ -98,6 +98,20 @@ export async function syncFullName(user: AuthUser, fullName: string) {
   await upsertProfileWithRetry(user.uid, email, trimmed);
 }
 
+/** Update the user's display name in Firebase and Supabase. */
+export async function updateDisplayName(user: AuthUser, fullName: string) {
+  const trimmed = fullName.trim();
+  if (!trimmed) {
+    throw new Error('Name is required.');
+  }
+
+  await user.updateProfile({ displayName: trimmed });
+  await user.reload();
+  const current = firebaseAuth().currentUser ?? user;
+  await syncFullName(current, trimmed);
+  return current;
+}
+
 /** Create or update the Supabase profile for the current Firebase user. */
 export async function ensureProfile(user: AuthUser, options?: { fullName?: string }) {
   const email = user.email;

@@ -26,8 +26,8 @@ const STATUS_CONFIG: Record<FieldStatus, { label: string; bg: string; text: stri
 type SortKey = 'name' | 'health' | 'acres' | 'issues';
 
 export function FieldsListScreen({ onNavigate, onBack }: ScreenProps) {
-  const { data, setSelectedFieldId } = useAppData();
-  const fields = data.fields;
+  const { getFieldsForSelectedFarm, setSelectedFieldId } = useAppData();
+  const fields = getFieldsForSelectedFarm();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<SortKey>('health');
   const [sortAsc, setSortAsc] = useState(true);

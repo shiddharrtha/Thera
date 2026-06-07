@@ -18,8 +18,8 @@ import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
 export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
-  const { data, selectedFieldId, setSelectedFieldId, startScan, hasCompletedScans } = useAppData();
-  const fields = data.fields;
+  const { selectedFieldId, setSelectedFieldId, startScan, hasCompletedScans, getFieldsForSelectedFarm } = useAppData();
+  const fields = getFieldsForSelectedFarm();
 
   const [activeFieldId, setActiveFieldId] = useState<string | null>(
     selectedFieldId ?? (fields.length === 1 ? fields[0]?.id ?? null : null),
