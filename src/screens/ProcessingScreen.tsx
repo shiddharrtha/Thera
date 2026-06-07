@@ -5,6 +5,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
 import { useAppData } from '../context/AppDataContext';
 import { getScanVideoErrorMessage } from '../services/scanUpload';
+import { getScanAnalysisErrorMessage } from '../services/scanAnalysis';
+import type { ScanAnalysisResult } from '../services/scanAnalysis';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
@@ -19,9 +21,24 @@ const STEPS = [
 ];
 
 const UPLOAD_PROGRESS_MAX = 30;
+const ANALYSIS_PROGRESS_MAX = 99;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function mapAnalysisProgressToStep(analysisPercent: number): number {
+  if (analysisPercent < 20) return 1;
+  if (analysisPercent < 40) return 2;
+  if (analysisPercent < 60) return 3;
+  if (analysisPercent < 75) return 4;
+  if (analysisPercent < 90) return 5;
+  return 6;
+}
+
+function mapAnalysisPercentToOverall(analysisPercent: number): number {
+  const span = ANALYSIS_PROGRESS_MAX - UPLOAD_PROGRESS_MAX;
+  return UPLOAD_PROGRESS_MAX + Math.round((analysisPercent / 100) * span);
 }
 
 export function ProcessingScreen({ onNavigate }: ScreenProps) {
@@ -29,8 +46,10 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
     selectedScanId,
     getScan,
     uploadScanVideo,
+    analyzeScan,
     advanceScanProgress,
     completeScan,
+    isAnalysisApiConfigured,
   } = useAppData();
   const scan = selectedScanId ? getScan(selectedScanId) : undefined;
   const isFirstScan = scan?.isFirstScan ?? false;
@@ -39,15 +58,18 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
   const [done, setDone] = useState(false);
   const [scanLine, setScanLine] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [overallProgress, setOverallProgress] = useState(0);
   const pipelineScanIdRef = useRef<string | null>(null);
   const getScanRef = useRef(getScan);
   const uploadScanVideoRef = useRef(uploadScanVideo);
+  const analyzeScanRef = useRef(analyzeScan);
   const advanceScanProgressRef = useRef(advanceScanProgress);
   const completeScanRef = useRef(completeScan);
 
   getScanRef.current = getScan;
   uploadScanVideoRef.current = uploadScanVideo;
+  analyzeScanRef.current = analyzeScan;
   advanceScanProgressRef.current = advanceScanProgress;
   completeScanRef.current = completeScan;
 
@@ -57,6 +79,21 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
 
     let cancelled = false;
 
+    async function runMockAnalysis(scanId: string) {
+      for (let step = 1; step < STEPS.length; step++) {
+        if (cancelled) return;
+
+        setCurrentStep(step);
+        const analysisProgress =
+          UPLOAD_PROGRESS_MAX +
+          Math.round((step / (STEPS.length - 1)) * (ANALYSIS_PROGRESS_MAX - UPLOAD_PROGRESS_MAX));
+        const clamped = Math.min(analysisProgress, ANALYSIS_PROGRESS_MAX);
+        setOverallProgress(clamped);
+        await advanceScanProgressRef.current(scanId, clamped, 'processing');
+        await sleep(900);
+      }
+    }
+
     async function runPipeline() {
       const scanId = selectedScanId!;
       const initialScan = getScanRef.current(scanId);
@@ -64,6 +101,7 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
 
       setCurrentStep(0);
       setUploadError(null);
+      setAnalysisError(null);
       setDone(false);
       setOverallProgress(0);
 
@@ -88,21 +126,30 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
       if (cancelled) return;
       setCurrentStep(1);
 
-      for (let step = 1; step < STEPS.length; step++) {
-        if (cancelled) return;
+      let analysisResult: ScanAnalysisResult | undefined;
 
-        setCurrentStep(step);
-        const analysisProgress =
-          UPLOAD_PROGRESS_MAX +
-          Math.round((step / (STEPS.length - 1)) * (99 - UPLOAD_PROGRESS_MAX));
-        const clamped = Math.min(analysisProgress, 99);
-        setOverallProgress(clamped);
-        await advanceScanProgressRef.current(scanId, clamped, 'processing');
-        await sleep(900);
+      if (isAnalysisApiConfigured) {
+        try {
+          const result = await analyzeScanRef.current(scanId, (analysisPercent) => {
+            if (cancelled) return;
+            setCurrentStep(mapAnalysisProgressToStep(analysisPercent));
+            const overall = mapAnalysisPercentToOverall(analysisPercent);
+            setOverallProgress(overall);
+          });
+          analysisResult = result?.analysis;
+        } catch (error) {
+          if (cancelled) return;
+          setAnalysisError(getScanAnalysisErrorMessage(error));
+          return;
+        }
+      } else {
+        await runMockAnalysis(scanId);
       }
 
       if (cancelled) return;
-      await completeScanRef.current(scanId);
+      setCurrentStep(STEPS.length - 1);
+      setOverallProgress(98);
+      await completeScanRef.current(scanId, analysisResult);
       setOverallProgress(100);
       setDone(true);
     }
@@ -112,7 +159,7 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
     return () => {
       cancelled = true;
     };
-  }, [selectedScanId]);
+  }, [selectedScanId, isAnalysisApiConfigured]);
 
   useEffect(() => {
     const t = setInterval(() => setScanLine((s) => (s + 1) % 100), 20);
@@ -120,6 +167,7 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
   }, []);
 
   const progress = done ? 100 : overallProgress;
+  const blocked = Boolean(analysisError);
 
   return (
     <View style={styles.container}>
@@ -143,6 +191,11 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
             Upload skipped: {uploadError} Analysis will continue with the local scan.
           </Text>
         )}
+        {analysisError && (
+          <Text style={styles.analysisError}>
+            Analysis failed: {analysisError}
+          </Text>
+        )}
         <View style={styles.progressRow}>
           <View style={styles.progressTrack}>
             <View style={[styles.progressFill, { width: `${progress}%` }]} />
@@ -154,7 +207,7 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
       <ScrollView style={styles.steps}>
         {STEPS.map((step, i) => {
           const completed = i < currentStep || done;
-          const active = i === currentStep && !done;
+          const active = i === currentStep && !done && !blocked;
           return (
             <View key={step} style={styles.stepRow}>
               <View style={styles.stepIndicatorCol}>
@@ -194,6 +247,12 @@ export function ProcessingScreen({ onNavigate }: ScreenProps) {
               <Text style={styles.doneBtnText}>View Field Report →</Text>
             </View>
           </TouchableOpacity>
+        ) : blocked ? (
+          <View style={styles.waitCard}>
+            <Text style={styles.waitText}>
+              Check that the analysis server is running and EXPO_PUBLIC_ANALYSIS_API_URL points to your machine&apos;s LAN IP.
+            </Text>
+          </View>
         ) : (
           <View style={styles.waitCard}>
             <Text style={styles.waitText}>
@@ -225,6 +284,13 @@ const styles = createStyles({
     marginTop: 10,
     fontSize: 12,
     color: colors.warningText,
+    textAlign: 'center',
+    paddingHorizontal: 8,
+  },
+  analysisError: {
+    marginTop: 10,
+    fontSize: 12,
+    color: colors.destructive,
     textAlign: 'center',
     paddingHorizontal: 8,
   },

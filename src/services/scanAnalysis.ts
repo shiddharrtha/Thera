@@ -1,0 +1,267 @@
+import { File } from 'expo-file-system';
+import { firebaseAuth } from '../lib/firebase';
+import type { DetectedIssue, Field, FieldStatus, GpsPoint, Scan } from '../types/models';
+
+const ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;
+
+export interface ScanAnalysisResult {
+  weedCoverage: number;
+  stressCoverage: number;
+  healthScore: number;
+  summary: string;
+  recommendedSprayAcres: number;
+  estimatedSavings: number;
+  chemicalReductionPercent: number;
+  severity: FieldStatus;
+  findingsCount: number;
+  issues: DetectedIssue[];
+  framesAnalyzed: number;
+  analysisMode: 'yolo' | 'vegetation_cv';
+}
+
+type AnalysisApiResponse = {
+  weed_coverage: number;
+  stress_coverage: number;
+  health_score: number;
+  summary: string;
+  recommended_spray_acres: number;
+  estimated_savings: number;
+  chemical_reduction_percent: number;
+  severity: FieldStatus;
+  findings_count: number;
+  issues: DetectedIssue[];
+  frames_analyzed: number;
+  analysis_mode: 'yolo' | 'vegetation_cv';
+};
+
+function normalizeAnalysisApiUrl(raw: string): string {
+  let url = raw.trim().replace(/\/+$/, '');
+
+  if (!/^https?:\/\//i.test(url)) {
+    url = `http://${url}`;
+  }
+
+  // Allow bare host/IP in .env (e.g. 192.168.1.197 → http://192.168.1.197:8000)
+  const parsed = new URL(url);
+  if (!parsed.port && parsed.protocol === 'http:') {
+    parsed.port = '8000';
+    url = parsed.toString().replace(/\/$/, '');
+  }
+
+  return url;
+}
+
+function getAnalysisApiUrl(): string | null {
+  const url = process.env.EXPO_PUBLIC_ANALYSIS_API_URL?.trim();
+  if (!url) return null;
+  return normalizeAnalysisApiUrl(url);
+}
+
+export function isAnalysisApiConfigured(): boolean {
+  return Boolean(getAnalysisApiUrl());
+}
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  };
+
+  const devApiKey = process.env.EXPO_PUBLIC_ANALYSIS_API_KEY?.trim();
+  if (devApiKey) {
+    headers['X-Thera-Api-Key'] = devApiKey;
+  }
+
+  const user = firebaseAuth().currentUser;
+  if (user) {
+    const token = await user.getIdToken(true);
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return headers;
+}
+
+function mapAnalysisResponse(body: AnalysisApiResponse): ScanAnalysisResult {
+  return {
+    weedCoverage: body.weed_coverage,
+    stressCoverage: body.stress_coverage,
+    healthScore: body.health_score,
+    summary: body.summary,
+    recommendedSprayAcres: body.recommended_spray_acres,
+    estimatedSavings: body.estimated_savings,
+    chemicalReductionPercent: body.chemical_reduction_percent,
+    severity: body.severity,
+    findingsCount: body.findings_count,
+    issues: body.issues ?? [],
+    framesAnalyzed: body.frames_analyzed,
+    analysisMode: body.analysis_mode,
+  };
+}
+
+function buildAnalysisPayload(
+  scan: Scan,
+  field: Field,
+  userId: string,
+): Record<string, unknown> {
+  return {
+    scan_id: scan.id,
+    field_id: field.id,
+    user_id: userId,
+    video_path: scan.videoUrl ?? null,
+    acreage: field.acreage,
+    crop_type: field.cropType,
+    video_duration_seconds: scan.videoDurationSeconds ?? null,
+    gps_track: scan.gpsTrack ?? [],
+  };
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`));
+    }, ms);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function readLocalVideoPayload(localUri: string): Promise<Blob> {
+  const file = new File(localUri);
+  if (!file.exists) {
+    throw new Error('Scan video file was not found on this device.');
+  }
+
+  const response = await fetch(localUri);
+  if (!response.ok) {
+    throw new Error('Could not read local scan video for analysis.');
+  }
+
+  const blob = await response.blob();
+  if (blob.size === 0) {
+    throw new Error('Scan video file is empty.');
+  }
+  return blob;
+}
+
+export function getScanAnalysisErrorMessage(error: unknown): string {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error && 'message' in error
+        ? String((error as { message: string }).message)
+        : 'Scan analysis failed.';
+
+  if (/timed out/i.test(message)) {
+    return 'Analysis took too long. Check your connection and try again.';
+  }
+
+  if (/Network request failed|Could not reach|fetch/i.test(message)) {
+    return 'Could not reach the analysis server. Check EXPO_PUBLIC_ANALYSIS_API_URL and that the backend is running.';
+  }
+
+  return message;
+}
+
+/** Run AI analysis for a scan via the Thera analysis API. */
+export async function analyzeScanVideo(
+  scan: Scan,
+  field: Field,
+  userId: string,
+  onProgress?: (percent: number) => void,
+): Promise<ScanAnalysisResult> {
+  const baseUrl = getAnalysisApiUrl();
+  if (!baseUrl) {
+    throw new Error('Analysis API URL is not configured.');
+  }
+
+  onProgress?.(5);
+  const headers = await getAuthHeaders();
+  const payload = buildAnalysisPayload(scan, field, userId);
+
+  onProgress?.(15);
+
+  const useMultipart = Boolean(scan.videoUri && !scan.videoUrl);
+  const endpoint = useMultipart
+    ? `${baseUrl}/v1/scans/analyze/upload`
+    : `${baseUrl}/v1/scans/analyze`;
+
+  let response: Response;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let heartbeatProgress = 35;
+
+  const startHeartbeat = () => {
+    heartbeat = setInterval(() => {
+      heartbeatProgress = Math.min(heartbeatProgress + 4, 84);
+      onProgress?.(heartbeatProgress);
+    }, 2000);
+  };
+
+  const stopHeartbeat = () => {
+    if (heartbeat) {
+      clearInterval(heartbeat);
+      heartbeat = undefined;
+    }
+  };
+
+  try {
+    if (useMultipart) {
+      const formData = new FormData();
+      formData.append('payload', JSON.stringify(payload));
+      const blob = await readLocalVideoPayload(scan.videoUri!);
+      formData.append('video', blob, `${scan.id}.mp4`);
+
+      onProgress?.(35);
+      startHeartbeat();
+      response = await withTimeout(
+        fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: formData,
+        }),
+        ANALYSIS_TIMEOUT_MS,
+        'Scan analysis upload',
+      );
+    } else {
+      onProgress?.(35);
+      startHeartbeat();
+      response = await withTimeout(
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            ...headers,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        }),
+        ANALYSIS_TIMEOUT_MS,
+        'Scan analysis',
+      );
+    }
+  } finally {
+    stopHeartbeat();
+  }
+
+  onProgress?.(85);
+
+  let body: AnalysisApiResponse & { detail?: string };
+  try {
+    body = (await response.json()) as AnalysisApiResponse & { detail?: string };
+  } catch {
+    throw new Error(`Analysis server returned an invalid response (${response.status}).`);
+  }
+
+  if (!response.ok) {
+    throw new Error(body.detail ?? `Analysis failed (${response.status}).`);
+  }
+
+  onProgress?.(100);
+  return mapAnalysisResponse(body);
+}

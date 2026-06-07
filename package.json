@@ -45,7 +45,9 @@
     "db:migrate-farm-profile": "node scripts/apply-farm-profile-migration.mjs",
     "db:migrate-fields-scans": "node scripts/apply-fields-scans-migration.mjs",
     "db:migrate-scan-video": "node scripts/apply-scan-video-migration.mjs",
-    "db:migrate-recorded-at-ms": "node scripts/apply-recorded-at-ms-migration.mjs"
+    "db:migrate-recorded-at-ms": "node scripts/apply-recorded-at-ms-migration.mjs",
+    "analysis:dev": "cd backend && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload",
+    "analysis:setup": "cd backend && python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt"
   },
   "private": true,
   "engines": {

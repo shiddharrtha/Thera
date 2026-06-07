@@ -9,6 +9,7 @@ import { EmptyState } from '../components/EmptyState';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 import { formatOptionalDisplayDateTime, formatFromEpochMs, parseApiTimestamp } from '../utils/timestamps';
+import { formatPercent, getLatestCompletedScan, pressureColor, pressureLabel } from '../utils/scanMetrics';
 
 type Tab = 'overview' | 'map' | 'timeline' | 'reports';
 
@@ -41,6 +42,7 @@ export function FieldDetailScreen({ onNavigate, onBack }: ScreenProps) {
   const st = STATUS_LABELS[field.status];
   const reports = getReportsForField(field.id);
   const scans = getScansForField(field.id);
+  const latestScan = getLatestCompletedScan(scans);
   const hasScan = field.status !== 'unscanned';
 
   const tabs: { id: Tab; label: string }[] = [
@@ -86,8 +88,16 @@ export function FieldDetailScreen({ onNavigate, onBack }: ScreenProps) {
               )}
               <View style={styles.summaryMetrics}>
                 <Metric label="Last scanned" value={formatOptionalDisplayDateTime(field.lastScanDate)} />
-                <Metric label="Weed pressure" value={hasScan ? 'Medium' : '—'} />
-                <Metric label="Crop stress" value={hasScan ? 'Low' : '—'} />
+                <Metric
+                  label="Weed pressure"
+                  value={hasScan ? `${pressureLabel(latestScan?.weedCoverage)} (${formatPercent(latestScan?.weedCoverage)})` : '—'}
+                  valueColor={hasScan ? pressureColor(latestScan?.weedCoverage) : undefined}
+                />
+                <Metric
+                  label="Crop stress"
+                  value={hasScan ? `${pressureLabel(latestScan?.stressCoverage)} (${formatPercent(latestScan?.stressCoverage)})` : '—'}
+                  valueColor={hasScan ? pressureColor(latestScan?.stressCoverage) : undefined}
+                />
                 <Metric label="Open issues" value={String(field.openIssues)} />
                 <Metric label="Savings" value={`$${field.totalSavings}`} highlight />
               </View>
@@ -185,11 +195,23 @@ export function FieldDetailScreen({ onNavigate, onBack }: ScreenProps) {
   );
 }
 
-function Metric({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+function Metric({
+  label,
+  value,
+  highlight,
+  valueColor,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+  valueColor?: string;
+}) {
   return (
     <View style={styles.metric}>
       <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={[styles.metricValue, highlight && { color: colors.primary }]}>{value}</Text>
+      <Text style={[styles.metricValue, highlight && { color: colors.primary }, valueColor && { color: valueColor }]}>
+        {value}
+      </Text>
     </View>
   );
 }

@@ -152,6 +152,25 @@ function fieldToRow(field: Field, userId: string): FieldRow {
   };
 }
 
+function parseOptionalNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseGpsTrack(track: unknown): GpsPoint[] | null {
+  if (!track) return null;
+  if (typeof track === 'string') {
+    try {
+      return parseGpsTrack(JSON.parse(track));
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(track)) return null;
+  return normalizeGpsTrack(track as GpsPoint[]);
+}
+
 function rowToScan(row: ScanRow): Scan {
   const recordedAtMs = row.recorded_at_ms ?? parseApiTimestamp(row.created_at);
   return {
@@ -162,13 +181,13 @@ function rowToScan(row: ScanRow): Scan {
     completedAt: row.completed_at ? toIsoTimestamp(row.completed_at) : undefined,
     status: row.status,
     progress: row.progress,
-    weedCoverage: row.weed_coverage ?? undefined,
-    stressCoverage: row.stress_coverage ?? undefined,
-    healthScore: row.health_score ?? undefined,
+    weedCoverage: parseOptionalNumber(row.weed_coverage),
+    stressCoverage: parseOptionalNumber(row.stress_coverage),
+    healthScore: parseOptionalNumber(row.health_score),
     isFirstScan: row.is_first_scan,
     videoUrl: row.video_url ?? undefined,
-    videoDurationSeconds: row.video_duration_seconds ?? undefined,
-    gpsTrack: normalizeGpsTrack(row.gps_track) ?? undefined,
+    videoDurationSeconds: parseOptionalNumber(row.video_duration_seconds),
+    gpsTrack: parseGpsTrack(row.gps_track) ?? undefined,
   };
 }
 

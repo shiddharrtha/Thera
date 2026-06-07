@@ -19,6 +19,11 @@ import {
 } from '../services/fieldData';
 import { fetchFarmProfile, saveFarmProfile } from '../services/profile';
 import { uploadScanVideoFile } from '../services/scanUpload';
+import {
+  analyzeScanVideo,
+  isAnalysisApiConfigured,
+  type ScanAnalysisResult,
+} from '../services/scanAnalysis';
 import type {
   AppDataState,
   CostAssumptions,
@@ -43,7 +48,28 @@ function deriveFieldStatus(healthScore?: number, openIssues?: number): Field['st
   return 'healthy';
 }
 
-function generateReportFromScan(field: Field, scan: Scan): Report {
+function buildReportFromAnalysis(field: Field, scan: Scan, analysis: ScanAnalysisResult): Report {
+  const recordedAtMs = getScanRecordedAtMs(scan);
+
+  return {
+    id: createId('report'),
+    scanId: scan.id,
+    fieldId: field.id,
+    createdAt: toIsoTimestamp(recordedAtMs),
+    recordedAtMs,
+    summary: analysis.summary,
+    recommendedSprayAcres: analysis.recommendedSprayAcres,
+    estimatedSavings: analysis.estimatedSavings,
+    chemicalReductionPercent: analysis.chemicalReductionPercent,
+    healthScore: analysis.healthScore,
+    severity: analysis.severity,
+    findingsCount: analysis.findingsCount,
+    issues: analysis.issues,
+  };
+}
+
+/** Fallback when the analysis API is not configured (local dev without backend). */
+function generateMockReportFromScan(field: Field, scan: Scan): Report {
   const healthScore = scan.healthScore ?? 78;
   const weedCoverage = scan.weedCoverage ?? 18;
   const stressCoverage = scan.stressCoverage ?? 8;
@@ -107,8 +133,16 @@ interface AppDataContextValue {
   updateCostAssumptions: (assumptions: CostAssumptions) => Promise<void>;
   startScan: (fieldId: string, capture?: ScanCapture) => Promise<Scan>;
   uploadScanVideo: (scanId: string, onProgress?: (percent: number) => void) => Promise<Scan | null>;
+  analyzeScan: (
+    scanId: string,
+    onProgress?: (percent: number) => void,
+  ) => Promise<{ scan: Scan; analysis: ScanAnalysisResult } | null>;
   advanceScanProgress: (scanId: string, progress: number, status?: Scan['status']) => Promise<Scan | null>;
-  completeScan: (scanId: string) => Promise<{ scan: Scan; report: Report } | null>;
+  completeScan: (
+    scanId: string,
+    analysis?: ScanAnalysisResult,
+  ) => Promise<{ scan: Scan; report: Report } | null>;
+  isAnalysisApiConfigured: boolean;
   getField: (id: string) => Field | undefined;
   getScan: (id: string) => Scan | undefined;
   getReport: (id: string) => Report | undefined;
@@ -361,9 +395,6 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         ...scan,
         progress,
         status: status ?? scan.status,
-        weedCoverage: progress >= 60 ? 18 + Math.round(Math.random() * 8) : scan.weedCoverage,
-        stressCoverage: progress >= 80 ? 6 + Math.round(Math.random() * 6) : scan.stressCoverage,
-        healthScore: progress >= 90 ? 72 + Math.round(Math.random() * 20) : scan.healthScore,
       };
       const scans = data.scans.map((s) => (s.id === scanId ? updated : s));
 
@@ -444,8 +475,47 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     [data, persist, user],
   );
 
+  const analyzeScan = useCallback(
+    async (scanId: string, onProgress?: (percent: number) => void) => {
+      const scan = data.scans.find((s) => s.id === scanId);
+      const field = data.fields.find((f) => f.id === scan?.fieldId);
+      if (!scan || !field) return null;
+
+      if (!user) {
+        throw new Error('Sign in to analyze scans.');
+      }
+
+      const analysis = await analyzeScanVideo(scan, field, user.uid, onProgress);
+      const updated: Scan = {
+        ...scan,
+        weedCoverage: analysis.weedCoverage,
+        stressCoverage: analysis.stressCoverage,
+        healthScore: analysis.healthScore,
+        progress: 99,
+        status: 'processing',
+      };
+
+      const next = {
+        ...data,
+        scans: data.scans.map((s) => (s.id === scanId ? updated : s)),
+      };
+      await persist(next);
+
+      if (user) {
+        void updateScan(user.uid, updated).catch((error) => {
+          if (__DEV__) {
+            console.warn('[scanAnalysis] background scan sync failed', error);
+          }
+        });
+      }
+
+      return { scan: updated, analysis };
+    },
+    [data, persist, user],
+  );
+
   const completeScan = useCallback(
-    async (scanId: string) => {
+    async (scanId: string, analysis?: ScanAnalysisResult) => {
       const scan = data.scans.find((s) => s.id === scanId);
       const field = data.fields.find((f) => f.id === scan?.fieldId);
       if (!scan || !field) return null;
@@ -456,11 +526,13 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         status: 'completed',
         progress: 100,
         completedAt,
-        weedCoverage: scan.weedCoverage ?? 18,
-        stressCoverage: scan.stressCoverage ?? 8,
-        healthScore: scan.healthScore ?? 82,
+        weedCoverage: analysis?.weedCoverage ?? scan.weedCoverage ?? 18,
+        stressCoverage: analysis?.stressCoverage ?? scan.stressCoverage ?? 8,
+        healthScore: analysis?.healthScore ?? scan.healthScore ?? 82,
       };
-      const report = generateReportFromScan(field, completedScan);
+      const report = analysis
+        ? buildReportFromAnalysis(field, completedScan, analysis)
+        : generateMockReportFromScan(field, completedScan);
       const updatedField: Field = {
         ...field,
         healthScore: report.healthScore,
@@ -476,18 +548,17 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         fields: data.fields.map((f) => (f.id === field.id ? updatedField : f)),
       };
 
-      if (user) {
-        try {
-          await completeScanRemote(user.uid, completedScan, report, updatedField);
-        } catch (error) {
-          if (__DEV__) {
-            console.warn('[fieldData] complete scan failed, saving locally', error);
-          }
-        }
-      }
-
       await persist(next);
       setSelectedReportId(report.id);
+
+      if (user) {
+        void completeScanRemote(user.uid, completedScan, report, updatedField).catch((error) => {
+          if (__DEV__) {
+            console.warn('[fieldData] background complete scan sync failed', error);
+          }
+        });
+      }
+
       return { scan: completedScan, report };
     },
     [data, persist, user],
@@ -556,8 +627,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       updateCostAssumptions,
       startScan,
       uploadScanVideo,
+      analyzeScan,
       advanceScanProgress,
       completeScan,
+      isAnalysisApiConfigured: isAnalysisApiConfigured(),
       getField,
       getScan,
       getReport,
@@ -580,6 +653,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       updateCostAssumptions,
       startScan,
       uploadScanVideo,
+      analyzeScan,
       advanceScanProgress,
       completeScan,
       getField,

@@ -14,6 +14,7 @@ import { EmptyState } from '../components/EmptyState';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 import { formatOptionalDisplayDateTime } from '../utils/timestamps';
+import { getLatestCompletedScan, pressureColor, pressureLabel } from '../utils/scanMetrics';
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -29,7 +30,7 @@ function getFirstName(displayName?: string | null) {
 
 export function HomeScreen({ onNavigate }: ScreenProps) {
   const { user } = useAuth();
-  const { data, hasCompletedScans, getSavingsSummary, setSelectedFieldId } = useAppData();
+  const { data, hasCompletedScans, getSavingsSummary, setSelectedFieldId, getScansForField } = useAppData();
 
   const firstName = getFirstName(user?.displayName);
   const avatarInitial = firstName.charAt(0).toUpperCase();
@@ -108,6 +109,7 @@ export function HomeScreen({ onNavigate }: ScreenProps) {
             </View>
 
             {fields.map((f) => {
+              const latestScan = getLatestCompletedScan(getScansForField(f.id));
               const unscanned = f.status === 'unscanned';
               const healthColor = unscanned
                 ? colors.gray400
@@ -148,11 +150,15 @@ export function HomeScreen({ onNavigate }: ScreenProps) {
                       <View style={styles.statsRow}>
                         <View style={styles.stat}>
                           <Text style={styles.statLabel}>Weed Pressure</Text>
-                          <Text style={[styles.statValue, { color: colors.warning }]}>Medium</Text>
+                          <Text style={[styles.statValue, { color: pressureColor(latestScan?.weedCoverage) }]}>
+                            {pressureLabel(latestScan?.weedCoverage)}
+                          </Text>
                         </View>
                         <View style={styles.stat}>
                           <Text style={styles.statLabel}>Crop Stress</Text>
-                          <Text style={[styles.statValue, { color: colors.success }]}>Low</Text>
+                          <Text style={[styles.statValue, { color: pressureColor(latestScan?.stressCoverage) }]}>
+                            {pressureLabel(latestScan?.stressCoverage)}
+                          </Text>
                         </View>
                       </View>
                     </>

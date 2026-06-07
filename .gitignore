@@ -43,6 +43,14 @@ firebase-debug.*.log
 .firebase/
 firebase/functions/node_modules/
 
+# Python analysis backend
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.env
+backend/firebase-service-account.json
+backend/models/*.pt
+
 # generated native folders
 /ios
 /android
