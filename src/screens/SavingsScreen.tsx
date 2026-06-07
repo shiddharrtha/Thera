@@ -45,7 +45,14 @@ export function SavingsScreen({ onNavigate }: ScreenProps) {
           </View>
           <Text style={styles.heroLabel}>TOTAL ESTIMATED SAVINGS</Text>
           <Text style={styles.heroAmount}>${savings.totalSavings}</Text>
-          <Text style={styles.heroSub}>this season</Text>
+          <Text style={styles.heroSub}>
+            {savings.reportCount === 1 ? 'from 1 field report' : `from ${savings.reportCount} field reports`} this season
+          </Text>
+          {savings.totalSavings === 0 && savings.reportCount > 0 && (
+            <Text style={styles.heroHint}>
+              Savings estimates appear after your report includes spray reduction data.
+            </Text>
+          )}
           {savings.avgReduction !== null && (
             <View style={styles.heroRow}>
               <Ionicons name="trending-down" size={14} color={colors.green300} />
@@ -140,7 +147,8 @@ const styles = createStyles({
   },
   heroLabel: { fontSize: 10, fontWeight: '700', color: colors.greenLight, letterSpacing: 2 },
   heroAmount: { fontSize: 48, fontWeight: '900', color: colors.white },
-  heroSub: { fontSize: 14, color: colors.green300, marginTop: 8 },
+  heroSub: { fontSize: 14, color: colors.green300, marginTop: 8, textAlign: 'center' },
+  heroHint: { fontSize: 12, color: colors.greenLight, marginTop: 10, textAlign: 'center', paddingHorizontal: 8 },
   heroRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 },
   heroRowText: { fontSize: 12, color: colors.green300 },
   statsRow: { flexDirection: 'row', gap: 10 },

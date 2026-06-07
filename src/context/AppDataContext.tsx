@@ -52,7 +52,10 @@ import {
   getReportsForFarm,
   getScansForFarm,
   getSelectedFarm,
+  mergeReports,
+  mergeScans,
   resolveSelectedFarmId,
+  syncFieldSavingsFromReports,
 } from '../utils/farmHelpers';
 import { toIsoTimestamp, normalizeFieldTimestamps, normalizeScanTimestamps, getScanRecordedAtMs } from '../utils/timestamps';
 
@@ -235,7 +238,13 @@ interface AppDataContextValue {
   getReportsForField: (fieldId: string) => Report[];
   getScansForField: (fieldId: string) => Scan[];
   getUsage: () => { scansUsed: number; scansLimit: number | 'unlimited'; fieldsUsed: number; fieldsLimit: number | 'unlimited'; reportsUsed: number; reportsLimit: number | 'unlimited' };
-  getSavingsSummary: () => { totalSavings: number; sprayAreaAvoided: number; avgReduction: number | null; costReduction: number | null };
+  getSavingsSummary: () => {
+    totalSavings: number;
+    sprayAreaAvoided: number;
+    avgReduction: number | null;
+    costReduction: number | null;
+    reportCount: number;
+  };
   hasCompletedScans: boolean;
   resetForSignOut: () => void;
 }
@@ -345,8 +354,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
           if (hasRemoteData) {
             fields = remoteData.fields;
-            scans = remoteData.scans;
-            reports = remoteData.reports;
+            scans = mergeScans(local.scans, remoteData.scans);
+            reports = mergeReports(local.reports, remoteData.reports);
           } else if (local.fields.length > 0) {
             await migrateLocalFieldData(user, {
               fields: local.fields,
@@ -366,6 +375,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
         scans = normalizeScanTimestamps(scans);
         fields = normalizeFieldTimestamps(fields, scans);
+        fields = syncFieldSavingsFromReports(fields, reports);
 
         const merged = {
           ...local,
@@ -869,7 +879,9 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const getSavingsSummary = useCallback(() => {
     const farmFields = getFieldsForFarm(data.fields, data.selectedFarmId);
     const farmReports = getReportsForFarm(data.reports, data.fields, data.selectedFarmId);
-    const totalSavings = farmFields.reduce((sum, f) => sum + f.totalSavings, 0);
+    const totalFromReports = farmReports.reduce((sum, r) => sum + r.estimatedSavings, 0);
+    const totalFromFields = farmFields.reduce((sum, f) => sum + f.totalSavings, 0);
+    const totalSavings = Math.max(totalFromReports, totalFromFields);
     const totalAcres = farmFields.reduce((sum, f) => sum + f.acreage, 0);
     const sprayAcres = farmReports.reduce((sum, r) => sum + r.recommendedSprayAcres, 0);
     const sprayAreaAvoided = Math.max(0, totalAcres - sprayAcres);
@@ -877,12 +889,14 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       ? Math.round(farmReports.reduce((sum, r) => sum + r.chemicalReductionPercent, 0) / farmReports.length)
       : null;
     const costReduction = avgReduction;
-    return { totalSavings, sprayAreaAvoided, avgReduction, costReduction };
+    return { totalSavings, sprayAreaAvoided, avgReduction, costReduction, reportCount: farmReports.length };
   }, [data]);
 
   const hasCompletedScans = useMemo(() => {
     const farmScans = getScansForFarm(data.scans, data.fields, data.selectedFarmId);
-    return farmScans.some((s) => s.status === 'completed');
+    if (farmScans.some((s) => s.status === 'completed')) return true;
+    const farmReports = getReportsForFarm(data.reports, data.fields, data.selectedFarmId);
+    return farmReports.length > 0;
   }, [data]);
 
   const resetForSignOut = useCallback(() => {

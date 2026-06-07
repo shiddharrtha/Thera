@@ -398,15 +398,23 @@ export async function createReport(userId: string, report: Report) {
   });
 }
 
-/** Persist scan completion: insert completed scan, report, and update field. */
+/** Persist scan completion: upsert completed scan, report, and update field. */
 export async function completeScanRemote(
   userId: string,
   scan: Scan,
   report: Report,
   field: Field,
 ) {
-  await createScan(userId, scan);
-  await createReport(userId, report);
+  await withAuthRetry(async () => {
+    const row = scanToRow(scan, userId);
+    const { error } = await supabase.from('scans').upsert(row, { onConflict: 'id' });
+    if (error) throw error;
+  });
+  await withAuthRetry(async () => {
+    const row = reportToRow(report, userId);
+    const { error } = await supabase.from('reports').upsert(row, { onConflict: 'id' });
+    if (error) throw error;
+  });
   await withAuthRetry(async () => {
     const row = fieldToRow(field, userId);
     const { error } = await supabase

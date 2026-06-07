@@ -75,3 +75,51 @@ export function ensureFieldFarmId(field: Field, farmId: string | null | undefine
   if (!farmId || field.farmId) return field;
   return { ...field, farmId };
 }
+
+function mergeById<T extends { id: string }>(local: T[], remote: T[]): T[] {
+  const merged = new Map<string, T>();
+  for (const item of local) merged.set(item.id, item);
+  for (const item of remote) merged.set(item.id, item);
+  return Array.from(merged.values());
+}
+
+/** Keep in-progress local scans while preferring remote completed scan rows. */
+export function mergeScans(local: Scan[], remote: Scan[]): Scan[] {
+  const merged = new Map<string, Scan>();
+  for (const scan of remote) merged.set(scan.id, scan);
+  for (const scan of local) {
+    if (scan.status !== 'completed' || !merged.has(scan.id)) {
+      merged.set(scan.id, scan);
+    }
+  }
+  return Array.from(merged.values());
+}
+
+export function mergeReports(local: Report[], remote: Report[]): Report[] {
+  return mergeById(local, remote);
+}
+
+/** Ensure field savings reflect the latest report totals. */
+export function syncFieldSavingsFromReports(fields: Field[], reports: Report[]): Field[] {
+  const latestReportByField = new Map<string, Report>();
+  for (const report of reports) {
+    const recordedAtMs = report.recordedAtMs ?? Date.parse(report.createdAt);
+    const existing = latestReportByField.get(report.fieldId);
+    const existingMs = existing?.recordedAtMs ?? (existing ? Date.parse(existing.createdAt) : 0);
+    if (!existing || recordedAtMs >= existingMs) {
+      latestReportByField.set(report.fieldId, report);
+    }
+  }
+
+  return fields.map((field) => {
+    const report = latestReportByField.get(field.id);
+    if (!report) return field;
+    return {
+      ...field,
+      totalSavings: Math.max(field.totalSavings, report.estimatedSavings),
+      healthScore: field.healthScore ?? report.healthScore,
+      openIssues: Math.max(field.openIssues, report.findingsCount),
+      status: field.status === 'unscanned' ? report.severity : field.status,
+    };
+  });
+}
