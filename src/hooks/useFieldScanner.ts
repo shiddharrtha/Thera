@@ -12,6 +12,9 @@ import { normalizeLocationTimestamp, toIsoTimestamp } from '../utils/timestamps'
 
 export type GpsQuality = 'unknown' | 'good' | 'weak' | 'denied';
 
+/** expo-camera often returns no URI if stopRecording runs before frames are captured. */
+const MIN_RECORDING_SECONDS = 3;
+
 export function useFieldScanner() {
   const cameraRef = useRef<CameraView>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -231,6 +234,13 @@ export function useFieldScanner() {
   const stopRecording = useCallback(async (): Promise<ScanCapture | null> => {
     if (!cameraRef.current || !isRecording) return null;
 
+    if (secondsRef.current < MIN_RECORDING_SECONDS) {
+      setError(
+        `Keep recording for at least ${MIN_RECORDING_SECONDS} seconds before stopping.`,
+      );
+      return null;
+    }
+
     setError(null);
     cameraRef.current.stopRecording();
 
@@ -241,7 +251,9 @@ export function useFieldScanner() {
       setIsPaused(false);
 
       if (!result?.uri) {
-        setError('Recording failed — no video was saved.');
+        setError(
+          'Recording failed — no video was saved. Record for a few seconds while walking, then tap stop.',
+        );
         return null;
       }
 

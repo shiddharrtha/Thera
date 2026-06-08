@@ -359,7 +359,9 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
                 : isRecording
                   ? isPaused
                     ? 'Paused — tap to resume'
-                    : 'Keep going · Walk slowly'
+                    : seconds < 3
+                      ? 'Recording… keep walking for a few seconds'
+                      : 'Keep going · Walk slowly'
                   : 'Tap the button to start scanning'}
         </Text>
         <View style={styles.controlRow}>
