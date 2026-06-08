@@ -1,10 +1,9 @@
-import { fetch } from 'expo/fetch';
 import { File } from 'expo-file-system';
 import { Platform } from 'react-native';
 import { firebaseAuth } from '../lib/firebase';
 import type { DetectedIssue, Field, FieldStatus, GpsPoint, Scan } from '../types/models';
 import { createAbortError, isAbortError } from '../utils/abortError';
-import { appendVideoToFormData } from '../utils/videoFormData';
+import { appendVideoForAnalysisUpload } from '../utils/videoFormData';
 
 const ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -99,24 +98,38 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
-/** expo/fetch can fail cross-origin multipart uploads on web ("Load failed"). */
+/** Standard fetch for Railway — expo/fetch breaks cross-origin multipart on web and iOS. */
 function analysisFetch(input: string, init?: RequestInit): Promise<Response> {
-  if (Platform.OS === 'web') {
-    return globalThis.fetch(input, { ...init, credentials: 'omit' });
-  }
-  return fetch(input, init);
+  return globalThis.fetch(input, {
+    ...init,
+    credentials: 'omit',
+  });
 }
 
 async function verifyAnalysisServerReachable(baseUrl: string, headers: Record<string, string>) {
   const healthUrl = `${baseUrl}/health`;
-  const response = await withTimeout(
-    analysisFetch(healthUrl, { method: 'GET', headers }),
-    15_000,
-    'Analysis server health check',
-  );
-  if (!response.ok) {
-    throw new Error(`Analysis server health check failed (${response.status}).`);
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await withTimeout(
+        analysisFetch(healthUrl, { method: 'GET', headers }),
+        15_000,
+        'Analysis server health check',
+      );
+      if (!response.ok) {
+        throw new Error(`Analysis server health check failed (${response.status}).`);
+      }
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
+      }
+    }
   }
+
+  throw lastError instanceof Error ? lastError : new Error('Analysis server health check failed.');
 }
 
 function mapAnalysisResponse(body: AnalysisApiResponse): ScanAnalysisResult {
@@ -192,7 +205,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string, signal?:
 
 async function assertLocalVideoExists(localUri: string): Promise<void> {
   if (Platform.OS === 'web' && (localUri.startsWith('blob:') || localUri.startsWith('http'))) {
-    const response = await fetch(localUri);
+    const response = await globalThis.fetch(localUri);
     if (!response.ok) {
       throw new Error('Scan video could not be read from browser storage.');
     }
@@ -308,7 +321,7 @@ export async function analyzeScanVideo(
 
       await assertLocalVideoExists(scan.videoUri!);
       const videoExt = scan.videoExtension ?? 'mp4';
-      await appendVideoToFormData(formData, 'video', scan.videoUri!, `${scan.id}.${videoExt}`);
+      await appendVideoForAnalysisUpload(formData, 'video', scan.videoUri!, `${scan.id}.${videoExt}`);
 
       onProgress?.(35);
       heartbeatProgress = 35;

@@ -3,7 +3,7 @@ import { File } from 'expo-file-system';
 /** Read a local scan video as a Blob (web fallback path). */
 export async function readVideoBlob(localUri: string): Promise<Blob> {
   if (localUri.startsWith('blob:') || localUri.startsWith('http')) {
-    const response = await fetch(localUri);
+    const response = await globalThis.fetch(localUri);
     if (!response.ok) {
       throw new Error('Scan video could not be read from browser storage.');
     }
@@ -20,7 +20,7 @@ export async function readVideoBlob(localUri: string): Promise<Blob> {
   }
 
   try {
-    const response = await fetch(localUri);
+    const response = await globalThis.fetch(localUri);
     if (response.ok) {
       const blob = await response.blob();
       if (blob.size > 0) {
