@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { CameraView } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,7 +37,11 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
     markCameraReady,
     permissionsGranted,
     permissionsLoading,
+    permissionStatus,
+    permissionMessage,
     requestPermissions,
+    requestLocationOnly,
+    openAppSettings,
     isRecording,
     isStarting,
     isPaused,
@@ -50,6 +55,29 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
   } = useFieldScanner();
 
   const activeField = activeFieldId ? fields.find((f) => f.id === activeFieldId) : undefined;
+
+  // Single-field flow skips "Open Camera" — prompt for permissions as soon as scan opens.
+  useEffect(() => {
+    if (!confirmed || permissionsLoading || permissionStatus.canScan) return;
+    void requestPermissions();
+  }, [confirmed, permissionsLoading, permissionStatus.canScan, requestPermissions]);
+
+  if (Platform.OS === 'web') {
+    return (
+      <View style={styles.selectorContainer}>
+        <View style={styles.confirmBody}>
+          <Text style={styles.confirmName}>Scan requires the iPhone app</Text>
+          <Text style={styles.confirmMeta}>
+            Video recording does not work in the browser. Open Thera on your iPhone using the dev
+            app or TestFlight build to scan fields.
+          </Text>
+          <TouchableOpacity onPress={onBack}>
+            <Text style={styles.linkText}>Go back</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   const handleOpenCamera = async () => {
     setOpeningCamera(true);
@@ -178,20 +206,58 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
     return (
       <View style={styles.selectorContainer}>
         <View style={styles.confirmBody}>
-          <Text style={styles.confirmName}>Camera access needed</Text>
+          <Text style={styles.confirmName}>Permissions needed</Text>
           <Text style={styles.confirmMeta}>
-            Thera needs camera, microphone, and location permissions to record field scans.
+            Thera needs camera access to record scans. Location is recommended for GPS field mapping.
           </Text>
-          {scannerError && <Text style={styles.errorText}>{scannerError}</Text>}
+
+          <View style={styles.permissionList}>
+            <View style={styles.permissionRow}>
+              <Ionicons
+                name={permissionStatus.camera ? 'checkmark-circle' : 'close-circle'}
+                size={18}
+                color={permissionStatus.camera ? colors.success : colors.destructive}
+              />
+              <Text style={styles.permissionLabel}>Camera {permissionStatus.camera ? 'allowed' : 'required'}</Text>
+            </View>
+            <View style={styles.permissionRow}>
+              <Ionicons
+                name={permissionStatus.location ? 'checkmark-circle' : 'alert-circle'}
+                size={18}
+                color={permissionStatus.location ? colors.success : colors.warning}
+              />
+              <Text style={styles.permissionLabel}>
+                Location {permissionStatus.location ? 'allowed' : 'recommended'}
+              </Text>
+            </View>
+          </View>
+
+          {(scannerError || permissionMessage) && (
+            <Text style={styles.errorText}>{scannerError ?? permissionMessage}</Text>
+          )}
+
           <TouchableOpacity onPress={handleOpenCamera} disabled={openingCamera}>
             <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.confirmBtn}>
               {openingCamera ? (
                 <ActivityIndicator color={colors.white} />
               ) : (
-                <Text style={styles.confirmBtnText}>Grant Permissions</Text>
+                <Text style={styles.confirmBtnText}>
+                  {permissionStatus.camera ? 'Allow Location' : 'Allow Camera & Location'}
+                </Text>
               )}
             </LinearGradient>
           </TouchableOpacity>
+
+          {permissionStatus.camera && !permissionStatus.location ? (
+            <TouchableOpacity onPress={() => void requestLocationOnly()} disabled={openingCamera}>
+              <Text style={styles.linkText}>Request location only</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          <TouchableOpacity onPress={() => void openAppSettings()}>
+            <Text style={styles.linkText}>Open iPhone Settings</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity onPress={() => setConfirmed(false)}>
             <Text style={styles.linkText}>Go back</Text>
           </TouchableOpacity>
@@ -238,6 +304,8 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
         style={StyleSheet.absoluteFill}
         facing="back"
         mode="video"
+        mute
+        videoQuality="720p"
         active
         onCameraReady={markCameraReady}
         onMountError={({ message }) => {
@@ -346,6 +414,11 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
 
       <View style={styles.controls}>
         {scannerError && <Text style={styles.errorBanner}>{scannerError}</Text>}
+        {!permissionStatus.location && !isRecording ? (
+          <TouchableOpacity onPress={() => void requestLocationOnly()} style={styles.locationPrompt}>
+            <Text style={styles.locationPromptText}>Tap to enable GPS for this scan</Text>
+          </TouchableOpacity>
+        ) : null}
         {cameraMountError && !scannerError && (
           <Text style={styles.errorBanner}>Camera error: {cameraMountError}</Text>
         )}
@@ -455,6 +528,9 @@ const styles = createStyles({
   },
   confirmBtnText: { color: colors.white, fontWeight: '700', fontSize: 15 },
   errorText: { color: colors.destructive, fontSize: 13 },
+  permissionList: { gap: 8, marginTop: 4 },
+  permissionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  permissionLabel: { fontSize: 13, color: colors.gray700 },
   linkText: { textAlign: 'center', color: colors.primary, fontWeight: '600', fontSize: 14 },
   backBtnLight: { padding: 8, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.12)' },
   backBtnDark: { padding: 6, borderRadius: 12, backgroundColor: colors.background },
@@ -518,6 +594,19 @@ const styles = createStyles({
     color: '#FCA5A5',
     fontSize: 12,
     marginBottom: 12,
+  },
+  locationPrompt: {
+    alignSelf: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(245,158,11,0.25)',
+  },
+  locationPromptText: {
+    color: '#FDE68A',
+    fontSize: 11,
+    fontWeight: '700',
   },
   controlRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 40 },
   sideBtn: {
