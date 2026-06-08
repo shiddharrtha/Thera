@@ -31,6 +31,56 @@ Verify:
 curl http://localhost:8000/health
 ```
 
+## Deploy to Railway or Render (public URL for Vercel / mobile)
+
+The analysis API cannot run on Vercel (video processing). Host it on **Railway** or **Render**, then point the app at the public URL.
+
+### Railway (recommended)
+
+1. Create a project at [railway.app](https://railway.app) → **Deploy from GitHub** → select this repo
+2. Set **Root directory** to `backend` (or deploy using `backend/Dockerfile`)
+3. Add environment variables from `backend/.env.example`:
+   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+   - `THERA_ANALYSIS_API_KEY` (same value as `EXPO_PUBLIC_ANALYSIS_API_KEY` in the app)
+   - `THERA_CORS_ORIGINS=*` (or your `https://your-app.vercel.app` domain)
+   - Optional: `FIREBASE_PROJECT_ID` + paste service account JSON as `GOOGLE_APPLICATION_CREDENTIALS_JSON` if using Firebase tokens (not needed if using API key only)
+4. Railway assigns a URL like `https://thera-production.up.railway.app`
+5. Verify: `curl https://YOUR-URL/health`
+
+### Point Vercel at the hosted API
+
+1. Vercel → **Project → Settings → Environment Variables**
+2. Set `EXPO_PUBLIC_ANALYSIS_API_URL=https://YOUR-RAILWAY-URL` (no trailing slash)
+3. Set `EXPO_PUBLIC_ANALYSIS_API_KEY` to match `THERA_ANALYSIS_API_KEY`
+4. **Redeploy** the Vercel project (env vars are baked in at build time)
+
+Open your Vercel URL in a browser — scans will hit the cloud API instead of your Mac.
+
+### iPhone dev app (optional)
+
+Update project `.env`:
+
+```bash
+EXPO_PUBLIC_ANALYSIS_API_URL=https://YOUR-RAILWAY-URL
+EXPO_PUBLIC_ANALYSIS_API_KEY=dev-only-key
+```
+
+Restart Metro and reload the app. No Mac IP needed.
+
+### Quick test without cloud deploy (ngrok)
+
+Expose your local backend temporarily:
+
+```bash
+# Terminal 1
+npm run analysis:dev
+
+# Terminal 2
+ngrok http 8000
+```
+
+Use the `https://xxxx.ngrok-free.app` URL as `EXPO_PUBLIC_ANALYSIS_API_URL` on Vercel, then redeploy. Good for a few hours of testing; URL changes when ngrok restarts.
+
 ## Mobile app configuration
 
 Add to your project `.env`:

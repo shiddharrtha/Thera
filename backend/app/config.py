@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +19,16 @@ class Settings(BaseSettings):
     firebase_project_id: str | None = None
 
     scan_videos_bucket: str = "scan-videos"
+
+    @field_validator("thera_port", mode="before")
+    @classmethod
+    def port_from_platform(cls, value: object) -> object:
+        import os
+
+        platform_port = os.getenv("PORT")
+        if platform_port:
+            return int(platform_port)
+        return value
 
 
 def _normalize_supabase_url(url: str) -> str:
