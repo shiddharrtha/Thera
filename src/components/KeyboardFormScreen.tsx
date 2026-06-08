@@ -31,11 +31,17 @@ export function KeyboardFormScreen({
   centerContent = false,
 }: KeyboardFormScreenProps) {
   const insets = useSafeAreaInsets();
+  const isWeb = Platform.OS === 'web';
+  // Pressable + Keyboard.dismiss breaks TextInput on react-native-web (login/signup).
+  const ContentWrapper = isWeb ? View : Pressable;
+  const contentWrapperProps = isWeb
+    ? { style: styles.pressable }
+    : { style: styles.pressable, onPress: Keyboard.dismiss, accessible: false as const };
 
   return (
     <KeyboardAvoidingView
       style={[styles.flex, style]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
     >
       {header}
@@ -47,14 +53,12 @@ export function KeyboardFormScreen({
           scrollContentStyle,
         ]}
         keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        automaticallyAdjustKeyboardInsets
+        keyboardDismissMode={isWeb ? 'none' : 'on-drag'}
+        automaticallyAdjustKeyboardInsets={!isWeb}
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        <Pressable style={styles.pressable} onPress={Keyboard.dismiss} accessible={false}>
-          {children}
-        </Pressable>
+        <ContentWrapper {...contentWrapperProps}>{children}</ContentWrapper>
       </ScrollView>
       {footer}
     </KeyboardAvoidingView>

@@ -3,6 +3,7 @@ import {
   View,
   Text,
   TextInput,
+  Platform,
   StyleSheet,
   type TextInputProps,
 } from 'react-native';
@@ -68,6 +69,7 @@ export function FloatingInput({
             styles.input,
             focused && styles.inputFocused,
             right ? styles.inputWithRight : undefined,
+            Platform.OS === 'web' ? styles.inputWeb : undefined,
           ]}
         />
         {right && <View style={styles.right}>{right}</View>}
@@ -104,6 +106,11 @@ const styles = createStyles({
   },
   inputWithRight: {
     paddingRight: 48,
+  },
+  inputWeb: {
+    // RN Web defaults can suppress native input behavior in some browsers.
+    outlineStyle: 'none',
+    cursor: 'text',
   },
   right: {
     position: 'absolute',
