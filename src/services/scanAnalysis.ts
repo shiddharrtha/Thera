@@ -1,5 +1,6 @@
 import { fetch } from 'expo/fetch';
 import { File } from 'expo-file-system';
+import { Platform } from 'react-native';
 import { firebaseAuth } from '../lib/firebase';
 import type { DetectedIssue, Field, FieldStatus, GpsPoint, Scan } from '../types/models';
 import { createAbortError, isAbortError } from '../utils/abortError';
@@ -157,6 +158,18 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string, signal?:
 }
 
 async function assertLocalVideoExists(localUri: string): Promise<void> {
+  if (Platform.OS === 'web' && (localUri.startsWith('blob:') || localUri.startsWith('http'))) {
+    const response = await fetch(localUri);
+    if (!response.ok) {
+      throw new Error('Scan video could not be read from browser storage.');
+    }
+    const blob = await response.blob();
+    if (blob.size === 0) {
+      throw new Error('Recorded scan video was empty.');
+    }
+    return;
+  }
+
   const file = new File(localUri);
   if (!file.exists) {
     throw new Error('Scan video file was not found on this device.');
@@ -250,7 +263,8 @@ export async function analyzeScanVideo(
       heartbeatProgress = 22;
 
       await assertLocalVideoExists(scan.videoUri!);
-      await appendVideoToFormData(formData, 'video', scan.videoUri!, `${scan.id}.mp4`);
+      const videoExt = scan.videoExtension ?? 'mp4';
+      await appendVideoToFormData(formData, 'video', scan.videoUri!, `${scan.id}.${videoExt}`);
 
       onProgress?.(35);
       heartbeatProgress = 35;

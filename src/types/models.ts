@@ -99,6 +99,9 @@ export interface ScanCapture {
   recordedAt: string;
   /** ISO-8601 UTC — derived from recordedEndAtMs for storage. */
   recordedEndAt: string;
+  /** Web recordings — used for upload filename (webm/mp4). */
+  videoExtension?: string;
+  videoMimeType?: string;
 }
 
 export interface Scan {
@@ -119,6 +122,7 @@ export interface Scan {
   videoUri?: string;
   videoUrl?: string;
   videoDurationSeconds?: number;
+  videoExtension?: string;
   gpsTrack?: GpsPoint[];
 }
 

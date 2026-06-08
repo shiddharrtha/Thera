@@ -623,6 +623,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           isFirstScan,
           videoUri: capture?.videoUri,
           videoDurationSeconds: capture?.durationSeconds,
+          videoExtension: capture?.videoExtension,
           gpsTrack: capture?.gpsTrack,
         };
         scanRef.value = scan;

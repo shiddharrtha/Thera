@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
 import { useAppData } from '../context/AppDataContext';
 import { useFieldScanner } from '../hooks/useFieldScanner';
+import { WebScanCamera } from '../components/WebScanCamera';
 import { EmptyState } from '../components/EmptyState';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
@@ -32,7 +33,9 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
   const [cameraMountError, setCameraMountError] = useState<string | null>(null);
 
   const {
+    isWeb,
     cameraRef,
+    videoRef,
     cameraReady,
     markCameraReady,
     permissionsGranted,
@@ -61,23 +64,6 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
     if (!confirmed || permissionsLoading || permissionStatus.canScan) return;
     void requestPermissions();
   }, [confirmed, permissionsLoading, permissionStatus.canScan, requestPermissions]);
-
-  if (Platform.OS === 'web') {
-    return (
-      <View style={styles.selectorContainer}>
-        <View style={styles.confirmBody}>
-          <Text style={styles.confirmName}>Scan requires the iPhone app</Text>
-          <Text style={styles.confirmMeta}>
-            Video recording does not work in the browser. Open Thera on your iPhone using the dev
-            app or TestFlight build to scan fields.
-          </Text>
-          <TouchableOpacity onPress={onBack}>
-            <Text style={styles.linkText}>Go back</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
 
   const handleOpenCamera = async () => {
     setOpeningCamera(true);
@@ -255,7 +241,9 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
           ) : null}
 
           <TouchableOpacity onPress={() => void openAppSettings()}>
-            <Text style={styles.linkText}>Open iPhone Settings</Text>
+            <Text style={styles.linkText}>
+              {isWeb ? 'Browser site settings help' : 'Open iPhone Settings'}
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => setConfirmed(false)}>
@@ -299,20 +287,24 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
 
   return (
     <View style={styles.container}>
-      <CameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        facing="back"
-        mode="video"
-        mute
-        videoQuality="720p"
-        active
-        onCameraReady={markCameraReady}
-        onMountError={({ message }) => {
-          setCameraMountError(message);
-          if (__DEV__) console.warn('[scan] camera mount error', message);
-        }}
-      />
+      {isWeb ? (
+        <WebScanCamera videoRef={videoRef} style={StyleSheet.absoluteFill} />
+      ) : (
+        <CameraView
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          mode="video"
+          mute
+          videoQuality="720p"
+          active
+          onCameraReady={markCameraReady}
+          onMountError={({ message }) => {
+            setCameraMountError(message);
+            if (__DEV__) console.warn('[scan] camera mount error', message);
+          }}
+        />
+      )}
 
       <LinearGradient
         colors={['rgba(4,12,6,0.72)', 'transparent', 'rgba(5,13,7,0.85)']}
@@ -374,7 +366,18 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
 
         {!isRecording && (
           <View style={styles.instructions}>
-            {['Walk slowly between rows', 'Keep camera 2–3 feet above crop', 'Move in a straight line'].map((t) => (
+            {(isWeb
+              ? [
+                  'Allow camera when your browser prompts you',
+                  'Walk slowly between rows',
+                  'Keep camera 2–3 feet above crop',
+                ]
+              : [
+                  'Walk slowly between rows',
+                  'Keep camera 2–3 feet above crop',
+                  'Move in a straight line',
+                ]
+            ).map((t) => (
               <View key={t} style={styles.instructionRow}>
                 <View style={styles.instructionDot} />
                 <Text style={styles.instructionText}>{t}</Text>
