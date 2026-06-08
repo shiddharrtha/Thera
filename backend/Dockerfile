@@ -15,5 +15,5 @@ COPY app ./app
 
 ENV THERA_HOST=0.0.0.0
 
-# Railway/Render set PORT; default 8000 for local Docker runs
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Railway injects PORT; shell form required so $PORT expands at runtime
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
