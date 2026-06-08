@@ -31,10 +31,11 @@ app = FastAPI(
 )
 
 origins = [origin.strip() for origin in settings.thera_cors_origins.split(",") if origin.strip()]
+allow_all_origins = origins == ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins if origins != ["*"] else ["*"],
-    allow_credentials=True,
+    allow_origins=origins if allow_all_origins else origins,
+    allow_credentials=not allow_all_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

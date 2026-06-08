@@ -67,6 +67,17 @@ export function isAnalysisApiConfigured(): boolean {
   return Boolean(getAnalysisApiUrl());
 }
 
+/** Hostname shown in user-facing network errors (no secrets). */
+export function getAnalysisApiHost(): string | null {
+  const url = getAnalysisApiUrl();
+  if (!url) return null;
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
@@ -199,7 +210,17 @@ export function getScanAnalysisErrorMessage(error: unknown): string {
     return 'Analysis took too long. Check your connection and try again.';
   }
 
-  if (/Network request failed|Could not reach|fetch/i.test(message)) {
+  if (/Load failed|Failed to fetch|NetworkError|Network request failed/i.test(message)) {
+    const host = getAnalysisApiHost();
+    if (host && /192\.168\.|10\.|127\.0\.0\.1|localhost/i.test(host)) {
+      return `Could not reach ${host}. A LAN IP only works on your home Wi‑Fi. Set EXPO_PUBLIC_ANALYSIS_API_URL to your Railway URL on Vercel and redeploy.`;
+    }
+    return host
+      ? `Could not reach the analysis server (${host}). Check EXPO_PUBLIC_ANALYSIS_API_URL on Vercel, redeploy, and ensure Railway allows CORS (THERA_CORS_ORIGINS=*).`
+      : 'Analysis API URL is not configured. Set EXPO_PUBLIC_ANALYSIS_API_URL on Vercel to your Railway URL and redeploy.';
+  }
+
+  if (/Could not reach|fetch/i.test(message)) {
     return 'Could not reach the analysis server. Check EXPO_PUBLIC_ANALYSIS_API_URL and that the backend is running.';
   }
 

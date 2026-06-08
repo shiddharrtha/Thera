@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
 import { useAppData } from '../context/AppDataContext';
 import { getScanVideoErrorMessage } from '../services/scanUpload';
-import { getScanAnalysisErrorMessage, isScanCancelledError } from '../services/scanAnalysis';
+import { getScanAnalysisErrorMessage, getAnalysisApiHost, isScanCancelledError } from '../services/scanAnalysis';
 import type { ScanAnalysisResult } from '../services/scanAnalysis';
 import type { Scan } from '../types/models';
 import { colors } from '../theme/colors';
@@ -357,7 +357,11 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
               <Text style={styles.waitText}>
                 {completionError
                   ? 'Your scan finished processing but the report could not be saved. Go back and try again.'
-                  : 'Check that the analysis server is running and EXPO_PUBLIC_ANALYSIS_API_URL points to your machine\'s LAN IP.'}
+                  : analysisError
+                    ? 'Fix the analysis API URL (see error above), redeploy Vercel, then scan again.'
+                    : getAnalysisApiHost()
+                      ? `Could not reach ${getAnalysisApiHost()}. Set EXPO_PUBLIC_ANALYSIS_API_URL to your Railway HTTPS URL on Vercel and redeploy.`
+                      : 'Set EXPO_PUBLIC_ANALYSIS_API_URL to your Railway URL on Vercel, redeploy, then try again.'}
               </Text>
             </View>
             <TouchableOpacity onPress={onBack} style={styles.cancelBtn}>
