@@ -200,10 +200,15 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
         } catch (error) {
           if (cancelledRef.current || signal.aborted || isScanCancelledError(error)) return;
           const message = getScanAnalysisErrorMessage(error);
-          const serverUnreachable = /Could not reach|Network request failed|timed out/i.test(message);
+          const serverUnreachable = /Could not reach|Network request failed|timed out|Load failed|Failed to fetch/i.test(
+            message,
+          );
           if (serverUnreachable) {
+            const host = getAnalysisApiHost();
             setUploadError(
-              'Analysis server unreachable — generating an estimated report from your scan.',
+              host
+                ? `Could not upload to ${host} — ${message} Using an estimated report instead.`
+                : `Analysis server unreachable — ${message} Using an estimated report instead.`,
             );
             await runMockAnalysis(scanId);
           } else {

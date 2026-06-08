@@ -86,6 +86,8 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   const devApiKey = process.env.EXPO_PUBLIC_ANALYSIS_API_KEY?.trim();
   if (devApiKey) {
     headers['X-Thera-Api-Key'] = devApiKey;
+    // Dev API key is enough for Railway — skip Firebase token (can hang/fail on web).
+    return headers;
   }
 
   const user = firebaseAuth().currentUser;
@@ -95,6 +97,26 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   }
 
   return headers;
+}
+
+/** expo/fetch can fail cross-origin multipart uploads on web ("Load failed"). */
+function analysisFetch(input: string, init?: RequestInit): Promise<Response> {
+  if (Platform.OS === 'web') {
+    return globalThis.fetch(input, { ...init, credentials: 'omit' });
+  }
+  return fetch(input, init);
+}
+
+async function verifyAnalysisServerReachable(baseUrl: string, headers: Record<string, string>) {
+  const healthUrl = `${baseUrl}/health`;
+  const response = await withTimeout(
+    analysisFetch(healthUrl, { method: 'GET', headers }),
+    15_000,
+    'Analysis server health check',
+  );
+  if (!response.ok) {
+    throw new Error(`Analysis server health check failed (${response.status}).`);
+  }
 }
 
 function mapAnalysisResponse(body: AnalysisApiResponse): ScanAnalysisResult {
@@ -246,6 +268,7 @@ export async function analyzeScanVideo(
 
   onProgress?.(5);
   const headers = await getAuthHeaders();
+  await verifyAnalysisServerReachable(baseUrl, headers);
   const payload = buildAnalysisPayload(scan, field, userId);
 
   onProgress?.(15);
@@ -290,7 +313,7 @@ export async function analyzeScanVideo(
       onProgress?.(35);
       heartbeatProgress = 35;
       response = await withTimeout(
-        fetch(endpoint, {
+        analysisFetch(endpoint, {
           method: 'POST',
           headers,
           body: formData,
@@ -304,7 +327,7 @@ export async function analyzeScanVideo(
       onProgress?.(35);
       startHeartbeat();
       response = await withTimeout(
-        fetch(endpoint, {
+        analysisFetch(endpoint, {
           method: 'POST',
           headers: {
             ...headers,
