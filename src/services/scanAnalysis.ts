@@ -251,8 +251,8 @@ export function getScanAnalysisErrorMessage(error: unknown): string {
       return `Could not reach ${host}. A LAN IP only works on your home Wi‑Fi. Set EXPO_PUBLIC_ANALYSIS_API_URL to your Railway URL on Vercel and redeploy.`;
     }
     return host
-      ? `Could not reach the analysis server (${host}). Check EXPO_PUBLIC_ANALYSIS_API_URL on Vercel, redeploy, and ensure Railway allows CORS (THERA_CORS_ORIGINS=*).`
-      : 'Analysis API URL is not configured. Set EXPO_PUBLIC_ANALYSIS_API_URL on Vercel to your Railway URL and redeploy.';
+      ? `Could not reach the analysis server (${host}). Set EXPO_PUBLIC_ANALYSIS_API_URL and EXPO_PUBLIC_ANALYSIS_API_KEY on Vercel, redeploy, and ensure Railway allows CORS (THERA_CORS_ORIGINS=*).`
+      : 'Analysis API URL is not configured. Set EXPO_PUBLIC_ANALYSIS_API_URL and EXPO_PUBLIC_ANALYSIS_API_KEY on Vercel, then redeploy.';
   }
 
   if (/Could not reach|fetch/i.test(message)) {
