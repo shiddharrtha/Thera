@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
 import type { ScanCapture, GpsPoint } from '../types/models';
 import { normalizeLocationTimestamp, toIsoTimestamp } from '../utils/timestamps';
+import { cacheWebVideoBlob, releaseWebVideoBlob } from '../utils/webVideoBlobCache';
 import type { FieldScanner } from './fieldScannerTypes';
 import type { GpsQuality } from './useNativeFieldScanner';
 
@@ -302,9 +303,10 @@ export function useWebFieldScanner(): FieldScanner {
         }
 
         if (blobUrlRef.current) {
-          URL.revokeObjectURL(blobUrlRef.current);
+          releaseWebVideoBlob(blobUrlRef.current);
         }
         const uri = URL.createObjectURL(blob);
+        cacheWebVideoBlob(uri, blob);
         blobUrlRef.current = uri;
 
         const recordedAtMs = recordingStartedAtMsRef.current ?? Date.now();
@@ -355,7 +357,7 @@ export function useWebFieldScanner(): FieldScanner {
     previewStreamRef.current = null;
 
     if (blobUrlRef.current) {
-      URL.revokeObjectURL(blobUrlRef.current);
+      releaseWebVideoBlob(blobUrlRef.current);
       blobUrlRef.current = null;
     }
 
@@ -383,10 +385,7 @@ export function useWebFieldScanner(): FieldScanner {
       if (timerRef.current) clearInterval(timerRef.current);
       previewStreamRef.current?.getTracks().forEach((track) => track.stop());
       previewStreamRef.current = null;
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current);
-        blobUrlRef.current = null;
-      }
+      // Keep blob URL alive — ProcessingScreen reads the cached Blob after navigation.
     };
   }, [stopLocationWatch]);
 

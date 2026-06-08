@@ -6,6 +6,7 @@ import type { ScreenProps } from '../types/navigation';
 import { useAppData } from '../context/AppDataContext';
 import { getScanVideoErrorMessage } from '../services/scanUpload';
 import { getScanAnalysisErrorMessage, getAnalysisApiHost, isScanCancelledError } from '../services/scanAnalysis';
+import { releaseWebVideoBlob } from '../utils/webVideoBlobCache';
 import type { ScanAnalysisResult } from '../services/scanAnalysis';
 import type { Scan } from '../types/models';
 import { colors } from '../theme/colors';
@@ -141,6 +142,7 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
 
     async function runPipeline() {
       const scanId = runScanId;
+      let videoUri: string | undefined;
 
       try {
       setCurrentStep(0);
@@ -160,6 +162,8 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
         setAnalysisError(error instanceof Error ? error.message : 'Scan data not found.');
         return;
       }
+
+      videoUri = initialScan.videoUri;
 
       if (initialScan.videoUri && !initialScan.videoUrl && !isAnalysisApiConfigured) {
         try {
@@ -238,6 +242,10 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
           console.warn('[processing] pipeline failed', error);
         }
         setAnalysisError(getScanAnalysisErrorMessage(error));
+      } finally {
+        if (videoUri?.startsWith('blob:')) {
+          releaseWebVideoBlob(videoUri);
+        }
       }
     }
 
@@ -252,6 +260,10 @@ export function ProcessingScreen({ onNavigate, onBack }: ScreenProps) {
     return () => {
       cancelledRef.current = true;
       abortController.abort();
+      const scan = getScanRef.current(runScanId);
+      if (scan?.videoUri?.startsWith('blob:')) {
+        releaseWebVideoBlob(scan.videoUri);
+      }
     };
   }, [selectedScanId, isAnalysisApiConfigured]);
 

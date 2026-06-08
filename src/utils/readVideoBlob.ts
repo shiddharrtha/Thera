@@ -1,8 +1,17 @@
 import { File } from 'expo-file-system';
+import { getWebVideoBlob } from './webVideoBlobCache';
 
 /** Read a local scan video as a Blob (web fallback path). */
 export async function readVideoBlob(localUri: string): Promise<Blob> {
   if (localUri.startsWith('blob:') || localUri.startsWith('http')) {
+    const cached = getWebVideoBlob(localUri);
+    if (cached) {
+      if (cached.size === 0) {
+        throw new Error('Recorded scan video was empty.');
+      }
+      return cached.type ? cached : new Blob([cached], { type: 'video/webm' });
+    }
+
     const response = await globalThis.fetch(localUri);
     if (!response.ok) {
       throw new Error('Scan video could not be read from browser storage.');

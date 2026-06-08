@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { firebaseAuth } from '../lib/firebase';
 import type { DetectedIssue, Field, FieldStatus, GpsPoint, Scan } from '../types/models';
 import { createAbortError, isAbortError } from '../utils/abortError';
+import { readVideoBlob } from '../utils/readVideoBlob';
 import { appendVideoForAnalysisUpload } from '../utils/videoFormData';
 
 const ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;
@@ -205,14 +206,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string, signal?:
 
 async function assertLocalVideoExists(localUri: string): Promise<void> {
   if (Platform.OS === 'web' && (localUri.startsWith('blob:') || localUri.startsWith('http'))) {
-    const response = await globalThis.fetch(localUri);
-    if (!response.ok) {
-      throw new Error('Scan video could not be read from browser storage.');
-    }
-    const blob = await response.blob();
-    if (blob.size === 0) {
-      throw new Error('Recorded scan video was empty.');
-    }
+    await readVideoBlob(localUri);
     return;
   }
 
