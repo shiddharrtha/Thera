@@ -10,6 +10,11 @@ import { getFirstName, getNameInitial } from '../lib/userName';
 import { AccountProfileModal } from '../components/AccountProfileModal';
 import { FarmProfileFieldModal, type FarmProfileEditField } from '../components/FarmProfileFieldModal';
 import { farmToProfile } from '../utils/farmHelpers';
+import {
+  isPushSupported,
+  requestNotificationPermission,
+  syncPushTokenForUser,
+} from '../services/pushNotifications';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
@@ -87,6 +92,26 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
   const [signingOut, setSigningOut] = useState(false);
   const [editField, setEditField] = useState<FarmProfileEditField | null>(null);
   const [accountEditorOpen, setAccountEditorOpen] = useState(false);
+
+  const handleScanCompletedNotificationsToggle = async () => {
+    const nextEnabled = !settings.scanCompletedNotifications;
+
+    if (nextEnabled && isPushSupported()) {
+      const granted = await requestNotificationPermission();
+      if (!granted) {
+        Alert.alert(
+          'Notifications disabled',
+          'Allow notifications in your device settings to get alerts when a field report is ready.',
+        );
+        return;
+      }
+      if (user) {
+        await syncPushTokenForUser(user.uid);
+      }
+    }
+
+    await updateSettings({ scanCompletedNotifications: nextEnabled });
+  };
 
   const openFarmEditor = (field: FarmProfileEditField) => {
     if (!farm) {
@@ -239,7 +264,7 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
         </Section>
 
         <Section title="NOTIFICATIONS">
-          <SettingsRow icon="notifications" iconBg="#FEF3C7" iconColor="#D97706" label="Scan completed" sub="When a new AI report is ready" toggle={{ enabled: settings.scanCompletedNotifications, onToggle: () => updateSettings({ scanCompletedNotifications: !settings.scanCompletedNotifications }) }} />
+          <SettingsRow icon="notifications" iconBg="#FEF3C7" iconColor="#D97706" label="Scan completed" sub="When a new AI report is ready" toggle={{ enabled: settings.scanCompletedNotifications, onToggle: () => void handleScanCompletedNotificationsToggle() }} />
           <SettingsRow icon="notifications" iconBg="#FEE2E2" iconColor="#DC2626" label="Field alerts" sub="Weed & stress threshold alerts" toggle={{ enabled: settings.fieldAlerts, onToggle: () => updateSettings({ fieldAlerts: !settings.fieldAlerts }) }} />
           <SettingsRow icon="notifications" iconBg="#EFF6FF" iconColor="#3B82F6" label="Weekly digest" sub="Field summary every Monday" toggle={{ enabled: settings.weeklyDigest, onToggle: () => updateSettings({ weeklyDigest: !settings.weeklyDigest }) }} />
           <SettingsRow icon="notifications" label="Tips & best practices" sub="Agronomy advice from Thera" toggle={{ enabled: settings.tipsAndBestPractices, onToggle: () => updateSettings({ tipsAndBestPractices: !settings.tipsAndBestPractices }) }} last />

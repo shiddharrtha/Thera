@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Platform, View, StyleSheet } from 'react-native';
 import { ensureFirebaseInitialized } from './src/lib/firebase';
 import { useFonts } from 'expo-font';
@@ -27,6 +27,7 @@ import { AddFieldScreen } from './src/screens/AddFieldScreen';
 import { FieldDetailScreen } from './src/screens/FieldDetailScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { BillingScreen } from './src/screens/BillingScreen';
+import { usePushNotifications } from './src/hooks/usePushNotifications';
 import { colors } from './src/theme/colors';
 
 const AUTH_SCREENS: Screen[] = ['splash', 'login', 'signup', 'forgot-password'];
@@ -55,6 +56,9 @@ function AppNavigator() {
   const [screen, setScreen] = useState<Screen>('splash');
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [history, setHistory] = useState<Screen[]>([]);
+  const navigateRef = useRef<(s: Screen, options?: NavigateOptions) => void>(() => {});
+
+  usePushNotifications((screen) => navigateRef.current(screen));
 
   const completeLogin = useCallback(() => {
     setHistory([]);
@@ -146,6 +150,7 @@ function AppNavigator() {
     setHistory((h) => [...h, screen]);
     setScreen(s);
   };
+  navigateRef.current = navigate;
 
   const goBack = () => {
     const h = [...history];

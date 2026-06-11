@@ -43,7 +43,7 @@ export function getProfileSaveErrorMessage(error: unknown): string {
   if (
     code === 'PGRST204' ||
     code === '42703' ||
-    /farm_name|primary_region|default_crop|preferred_units|approximate_acres|onboarding_complete/i.test(
+    /farm_name|primary_region|default_crop|preferred_units|approximate_acres|onboarding_complete|expo_push_token/i.test(
       message,
     )
   ) {

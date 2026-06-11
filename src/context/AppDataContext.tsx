@@ -33,6 +33,7 @@ import {
   isAnalysisApiConfigured,
   type ScanAnalysisResult,
 } from '../services/scanAnalysis';
+import { notifyScanReportReady } from '../services/pushNotifications';
 import type {
   AppDataState,
   CostAssumptions,
@@ -810,6 +811,16 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       setSelectedReportId(completion.report.id);
       setSelectedScanId(completion.scan.id);
       setSelectedFieldId(completion.report.fieldId);
+
+      if (dataRef.current.settings.scanCompletedNotifications && !isAnalysisApiConfigured()) {
+        void notifyScanReportReady({
+          fieldName: completion.updatedField.name,
+          reportId: completion.report.id,
+          scanId: completion.scan.id,
+          fieldId: completion.report.fieldId,
+        });
+      }
+
       return { scan: completion.scan, report: completion.report };
     },
     [mutateAppData, user],

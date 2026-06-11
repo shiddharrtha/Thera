@@ -85,7 +85,15 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-localization"
+      "expo-localization",
+      [
+        "expo-notifications",
+        {
+          "color": "#1B6B38",
+          "defaultChannel": "scan-reports",
+          "enableBackgroundRemoteNotifications": true
+        }
+      ]
     ]
   }
 }

@@ -9,13 +9,14 @@ from pathlib import Path
 import logging
 import time
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.analysis.pipeline import analyze_video_file
 from app.auth import verify_request_auth
 from app.config import settings
 from app.models import AnalyzeScanRequest, AnalyzeScanResponse
+from app.push_notifications import maybe_send_scan_complete_push
 from app.storage import download_scan_video, upload_scan_video
 
 
@@ -78,6 +79,7 @@ async def _run_analysis(request: AnalyzeScanRequest, uploaded_path: Path | None)
 @app.post("/v1/scans/analyze", response_model=AnalyzeScanResponse)
 async def analyze_scan(
     request: AnalyzeScanRequest,
+    background_tasks: BackgroundTasks,
     auth_uid: str = Depends(verify_request_auth),
 ) -> AnalyzeScanResponse:
     if auth_uid != "dev-api-key" and auth_uid != request.user_id:
@@ -93,7 +95,14 @@ async def analyze_scan(
         )
 
     try:
-        return await _run_analysis(request, None)
+        response = await _run_analysis(request, None)
+        background_tasks.add_task(
+            maybe_send_scan_complete_push,
+            user_id=request.user_id,
+            scan_id=request.scan_id,
+            field_id=request.field_id,
+        )
+        return response
     except ValueError as exc:
         logger.exception("Analysis request invalid: %s", exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -109,6 +118,7 @@ async def analyze_scan(
 async def analyze_scan_upload(
     payload: str = Form(...),
     video: UploadFile = File(...),
+    background_tasks: BackgroundTasks,
     auth_uid: str = Depends(verify_request_auth),
 ) -> AnalyzeScanResponse:
     try:
@@ -142,6 +152,12 @@ async def analyze_scan_upload(
                 logger.warning("Cloud backup failed for scan %s: %s", request.scan_id, exc)
 
         response = await _run_analysis(request, temp_path)
+        background_tasks.add_task(
+            maybe_send_scan_complete_push,
+            user_id=request.user_id,
+            scan_id=request.scan_id,
+            field_id=request.field_id,
+        )
         if video_path:
             return response.model_copy(update={"video_path": video_path})
         return response
