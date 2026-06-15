@@ -35,6 +35,10 @@ export function isNotificationsSupported(): boolean {
   return isNativePushSupported();
 }
 
+export function isWebNotificationsSupported(): boolean {
+  return false;
+}
+
 export function configureNotificationHandler(): void {
   if (handlerConfigured) return;
 

@@ -16,6 +16,7 @@ import {
 
 export {
   clearExpoPushToken,
+  isWebNotificationsSupported,
   parseNavigableNotificationData,
   parseScanReportNotificationData,
   saveExpoPushToken,
