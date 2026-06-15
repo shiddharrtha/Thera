@@ -10,8 +10,10 @@ import { getFirstName, getNameInitial } from '../lib/userName';
 import { AccountProfileModal } from '../components/AccountProfileModal';
 import { FarmProfileFieldModal, type FarmProfileEditField } from '../components/FarmProfileFieldModal';
 import { farmToProfile } from '../utils/farmHelpers';
+import type { UserSettings } from '../types/models';
 import {
-  isPushSupported,
+  isNativePushSupported,
+  isNotificationsSupported,
   requestNotificationPermission,
   syncPushTokenForUser,
 } from '../services/pushNotifications';
@@ -93,24 +95,38 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
   const [editField, setEditField] = useState<FarmProfileEditField | null>(null);
   const [accountEditorOpen, setAccountEditorOpen] = useState(false);
 
-  const handleScanCompletedNotificationsToggle = async () => {
-    const nextEnabled = !settings.scanCompletedNotifications;
+  const handleNotificationToggle = async (
+    key: keyof Pick<
+      UserSettings,
+      'scanCompletedNotifications' | 'fieldAlerts' | 'weeklyDigest' | 'tipsAndBestPractices'
+    >,
+  ) => {
+    const nextEnabled = !settings[key];
 
-    if (nextEnabled && isPushSupported()) {
+    if (nextEnabled) {
+      if (!isNotificationsSupported()) {
+        Alert.alert(
+          'Notifications unavailable',
+          'This browser does not support notifications. Try Chrome, Safari, or Firefox.',
+        );
+        return;
+      }
+
       const granted = await requestNotificationPermission();
       if (!granted) {
         Alert.alert(
           'Notifications disabled',
-          'Allow notifications in your device settings to get alerts when a field report is ready.',
+          'Allow notifications in your browser or device settings to receive Thera alerts.',
         );
         return;
       }
-      if (user) {
+
+      if (key === 'scanCompletedNotifications' && user && isNativePushSupported()) {
         await syncPushTokenForUser(user.uid);
       }
     }
 
-    await updateSettings({ scanCompletedNotifications: nextEnabled });
+    await updateSettings({ [key]: nextEnabled });
   };
 
   const openFarmEditor = (field: FarmProfileEditField) => {
@@ -264,10 +280,10 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
         </Section>
 
         <Section title="NOTIFICATIONS">
-          <SettingsRow icon="notifications" iconBg="#FEF3C7" iconColor="#D97706" label="Scan completed" sub="When a new AI report is ready" toggle={{ enabled: settings.scanCompletedNotifications, onToggle: () => void handleScanCompletedNotificationsToggle() }} />
-          <SettingsRow icon="notifications" iconBg="#FEE2E2" iconColor="#DC2626" label="Field alerts" sub="Weed & stress threshold alerts" toggle={{ enabled: settings.fieldAlerts, onToggle: () => updateSettings({ fieldAlerts: !settings.fieldAlerts }) }} />
-          <SettingsRow icon="notifications" iconBg="#EFF6FF" iconColor="#3B82F6" label="Weekly digest" sub="Field summary every Monday" toggle={{ enabled: settings.weeklyDigest, onToggle: () => updateSettings({ weeklyDigest: !settings.weeklyDigest }) }} />
-          <SettingsRow icon="notifications" label="Tips & best practices" sub="Agronomy advice from Thera" toggle={{ enabled: settings.tipsAndBestPractices, onToggle: () => updateSettings({ tipsAndBestPractices: !settings.tipsAndBestPractices }) }} last />
+          <SettingsRow icon="notifications" iconBg="#FEF3C7" iconColor="#D97706" label="Scan completed" sub="When a new AI report is ready" toggle={{ enabled: settings.scanCompletedNotifications, onToggle: () => void handleNotificationToggle('scanCompletedNotifications') }} />
+          <SettingsRow icon="notifications" iconBg="#FEE2E2" iconColor="#DC2626" label="Field alerts" sub="Weed & stress threshold alerts" toggle={{ enabled: settings.fieldAlerts, onToggle: () => void handleNotificationToggle('fieldAlerts') }} />
+          <SettingsRow icon="notifications" iconBg="#EFF6FF" iconColor="#3B82F6" label="Weekly digest" sub="Field summary every Monday" toggle={{ enabled: settings.weeklyDigest, onToggle: () => void handleNotificationToggle('weeklyDigest') }} />
+          <SettingsRow icon="notifications" label="Tips & best practices" sub="Agronomy advice from Thera" toggle={{ enabled: settings.tipsAndBestPractices, onToggle: () => void handleNotificationToggle('tipsAndBestPractices') }} last />
         </Section>
 
         <Section title="PLAN & BILLING">

@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { Platform } from 'react-native';
 import { useAuth } from './AuthContext';
 import { clearAppData, EMPTY_APP_DATA, loadAppData, saveAppData } from '../lib/appStorage';
 import {
@@ -33,7 +34,7 @@ import {
   isAnalysisApiConfigured,
   type ScanAnalysisResult,
 } from '../services/scanAnalysis';
-import { notifyScanReportReady } from '../services/pushNotifications';
+import { notifyAfterScanComplete } from '../services/notificationTriggers';
 import type {
   AppDataState,
   CostAssumptions,
@@ -812,14 +813,14 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       setSelectedScanId(completion.scan.id);
       setSelectedFieldId(completion.report.fieldId);
 
-      if (dataRef.current.settings.scanCompletedNotifications && !isAnalysisApiConfigured()) {
-        void notifyScanReportReady({
-          fieldName: completion.updatedField.name,
-          reportId: completion.report.id,
-          scanId: completion.scan.id,
-          fieldId: completion.report.fieldId,
-        });
-      }
+      void notifyAfterScanComplete(dataRef.current.settings, {
+        fieldName: completion.updatedField.name,
+        report: completion.report,
+        scan: completion.scan,
+        fieldId: completion.report.fieldId,
+        skipScanCompleteWhenAnalysisApi:
+          Platform.OS !== 'web' && isAnalysisApiConfigured(),
+      });
 
       return { scan: completion.scan, report: completion.report };
     },

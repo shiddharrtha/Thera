@@ -3,8 +3,17 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { supabase } from '../lib/supabase';
+import {
+  getWebNotificationPermission,
+  isWebNotificationsSupported,
+  requestWebNotificationPermission,
+  showWebNotification,
+  type WebNotificationPayload,
+} from './webNotifications';
 
 export const SCAN_REPORTS_CHANNEL_ID = 'scan-reports';
+
+export type NotificationPayload = WebNotificationPayload;
 
 export type ScanReportNotificationData = {
   type: 'scan_complete';
@@ -15,12 +24,20 @@ export type ScanReportNotificationData = {
 
 let handlerConfigured = false;
 
-export function isPushSupported(): boolean {
+export function isNativePushSupported(): boolean {
   return Platform.OS === 'ios' || Platform.OS === 'android';
 }
 
+export function isPushSupported(): boolean {
+  return isNativePushSupported();
+}
+
+export function isNotificationsSupported(): boolean {
+  return isNativePushSupported() || isWebNotificationsSupported();
+}
+
 export function configureNotificationHandler(): void {
-  if (!isPushSupported() || handlerConfigured) return;
+  if (!isNativePushSupported() || handlerConfigured) return;
 
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
@@ -53,15 +70,22 @@ function getEasProjectId(): string | null {
   return projectId?.trim() || null;
 }
 
-export async function getNotificationPermissionStatus(): Promise<Notifications.PermissionStatus> {
-  if (!isPushSupported()) return Notifications.PermissionStatus.UNDETERMINED;
+export async function getNotificationPermissionStatus(): Promise<string> {
+  if (isWebNotificationsSupported()) {
+    const permission = await getWebNotificationPermission();
+    return permission === 'unsupported' ? 'undetermined' : permission;
+  }
+  if (!isNativePushSupported()) return 'undetermined';
   const { status } = await Notifications.getPermissionsAsync();
   return status;
 }
 
-/** Request OS permission and return whether notifications are allowed. */
+/** Request OS / browser permission. */
 export async function requestNotificationPermission(): Promise<boolean> {
-  if (!isPushSupported()) return false;
+  if (isWebNotificationsSupported()) {
+    return requestWebNotificationPermission();
+  }
+  if (!isNativePushSupported()) return false;
 
   await ensureAndroidChannel();
 
@@ -78,9 +102,37 @@ export async function requestNotificationPermission(): Promise<boolean> {
   return status === 'granted';
 }
 
+/** Show a notification on web (browser) or native (local). */
+export async function deliverNotification(options: {
+  title: string;
+  body: string;
+  tag?: string;
+  data?: NotificationPayload;
+}): Promise<void> {
+  const granted = await requestNotificationPermission();
+  if (!granted) return;
+
+  if (isWebNotificationsSupported()) {
+    showWebNotification(options.title, options.body, options.data, options.tag);
+    return;
+  }
+
+  if (!isNativePushSupported()) return;
+
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: options.title,
+      body: options.body,
+      sound: true,
+      data: options.data,
+    },
+    trigger: null,
+  });
+}
+
 /** Register for Expo push notifications on a physical device. */
 export async function registerForPushNotifications(): Promise<string | null> {
-  if (!isPushSupported()) return null;
+  if (!isNativePushSupported()) return null;
   if (!Device.isDevice) {
     if (__DEV__) {
       console.warn('[push] Push tokens require a physical device.');
@@ -116,10 +168,8 @@ export async function saveExpoPushToken(userId: string, token: string): Promise<
     .update({ expo_push_token: token })
     .eq('id', userId);
 
-  if (error) {
-    if (__DEV__) {
-      console.warn('[push] Could not save push token', error);
-    }
+  if (error && __DEV__) {
+    console.warn('[push] Could not save push token', error);
   }
 }
 
@@ -154,30 +204,39 @@ export function parseScanReportNotificationData(
   };
 }
 
-/** Show an immediate local notification (also appears on lock screen when backgrounded). */
+function parseNavigableNotificationData(
+  data: Record<string, unknown> | undefined,
+): ScanReportNotificationData | null {
+  if (!data) return null;
+  if (data.type === 'scan_complete' || data.type === 'field_alert') {
+    return {
+      type: 'scan_complete',
+      reportId: typeof data.reportId === 'string' ? data.reportId : undefined,
+      scanId: typeof data.scanId === 'string' ? data.scanId : undefined,
+      fieldId: typeof data.fieldId === 'string' ? data.fieldId : undefined,
+    };
+  }
+  return null;
+}
+
+export { parseNavigableNotificationData };
+
+/** @deprecated Use deliverNotification via notificationTriggers */
 export async function notifyScanReportReady(options: {
   fieldName: string;
   reportId: string;
   scanId: string;
   fieldId: string;
 }): Promise<void> {
-  if (!isPushSupported()) return;
-
-  const granted = await requestNotificationPermission();
-  if (!granted) return;
-
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: 'Field report ready',
-      body: `Your ${options.fieldName} scan has been analyzed.`,
-      sound: true,
-      data: {
-        type: 'scan_complete',
-        reportId: options.reportId,
-        scanId: options.scanId,
-        fieldId: options.fieldId,
-      } satisfies ScanReportNotificationData,
+  await deliverNotification({
+    title: 'Field report ready',
+    body: `Your ${options.fieldName} scan has been analyzed.`,
+    tag: `scan-complete-${options.scanId}`,
+    data: {
+      type: 'scan_complete',
+      reportId: options.reportId,
+      scanId: options.scanId,
+      fieldId: options.fieldId,
     },
-    trigger: null,
   });
 }

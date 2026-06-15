@@ -6,10 +6,16 @@ import type { Screen } from '../types/navigation';
 import {
   clearExpoPushToken,
   configureNotificationHandler,
-  isPushSupported,
-  parseScanReportNotificationData,
+  isNativePushSupported,
+  isWebNotificationsSupported,
+  parseNavigableNotificationData,
   syncPushTokenForUser,
 } from '../services/pushNotifications';
+import {
+  registerWebNotificationClickHandler,
+  type WebNotificationPayload,
+} from '../services/webNotifications';
+import { useNotificationScheduler } from './useNotificationScheduler';
 
 type NavigateFn = (screen: Screen) => void;
 
@@ -22,11 +28,15 @@ export function usePushNotifications(onNavigate: NavigateFn): void {
     setSelectedFieldId,
   } = useAppData();
 
+  useNotificationScheduler();
+
   useEffect(() => {
     configureNotificationHandler();
   }, []);
 
   const previousUserIdRef = useRef<string | undefined>();
+  const reportsRef = useRef(data.reports);
+  reportsRef.current = data.reports;
 
   useEffect(() => {
     const previousUserId = previousUserIdRef.current;
@@ -38,31 +48,51 @@ export function usePushNotifications(onNavigate: NavigateFn): void {
   }, [user?.uid]);
 
   useEffect(() => {
-    if (!user || !isPushSupported()) return;
+    if (!user || !isNativePushSupported()) return;
     if (!data.settings.scanCompletedNotifications) return;
 
     void syncPushTokenForUser(user.uid);
   }, [user, data.settings.scanCompletedNotifications]);
 
   useEffect(() => {
-    if (!isPushSupported()) return;
+    function openReportFromPayload(payload: WebNotificationPayload) {
+      const navigable = parseNavigableNotificationData(payload as Record<string, unknown>);
+      if (!navigable) return;
 
-    function openReportFromNotification(notification: Notifications.Notification) {
-      const payload = parseScanReportNotificationData(
-        notification.request.content.data as Record<string, unknown>,
-      );
-      if (!payload) return;
-
-      let reportId = payload.reportId;
-      if (!reportId && payload.scanId) {
-        reportId = data.reports.find((report) => report.scanId === payload.scanId)?.id;
+      let reportId = navigable.reportId;
+      if (!reportId && navigable.scanId) {
+        reportId = reportsRef.current.find((report) => report.scanId === navigable.scanId)?.id;
       }
       if (!reportId) return;
 
       setSelectedReportId(reportId);
-      if (payload.scanId) setSelectedScanId(payload.scanId);
-      if (payload.fieldId) setSelectedFieldId(payload.fieldId);
+      if (navigable.scanId) setSelectedScanId(navigable.scanId);
+      if (navigable.fieldId) setSelectedFieldId(navigable.fieldId);
       onNavigate('report');
+    }
+
+    if (isWebNotificationsSupported()) {
+      registerWebNotificationClickHandler((payload) => {
+        if (payload.type === 'weekly_digest') {
+          onNavigate('home');
+          return;
+        }
+        if (payload.type === 'tip') {
+          onNavigate('home');
+          return;
+        }
+        openReportFromPayload(payload);
+      });
+
+      return () => registerWebNotificationClickHandler(null);
+    }
+
+    if (!isNativePushSupported()) return;
+
+    function openReportFromNotification(notification: Notifications.Notification) {
+      openReportFromPayload(
+        notification.request.content.data as Record<string, unknown> as WebNotificationPayload,
+      );
     }
 
     const lastResponse = Notifications.getLastNotificationResponse();
@@ -75,11 +105,5 @@ export function usePushNotifications(onNavigate: NavigateFn): void {
     });
 
     return () => subscription.remove();
-  }, [
-    data.reports,
-    onNavigate,
-    setSelectedFieldId,
-    setSelectedReportId,
-    setSelectedScanId,
-  ]);
+  }, [onNavigate, setSelectedFieldId, setSelectedReportId, setSelectedScanId]);
 }
