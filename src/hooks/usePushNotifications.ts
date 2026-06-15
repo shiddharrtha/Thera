@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react';
-import * as Notifications from 'expo-notifications';
 import { useAuth } from '../context/AuthContext';
 import { useAppData } from '../context/AppDataContext';
 import type { Screen } from '../types/navigation';
 import {
+  addNotificationResponseListener,
   clearExpoPushToken,
   configureNotificationHandler,
+  getLastNotificationResponse,
   isNativePushSupported,
   isWebNotificationsSupported,
   parseNavigableNotificationData,
@@ -73,11 +74,7 @@ export function usePushNotifications(onNavigate: NavigateFn): void {
 
     if (isWebNotificationsSupported()) {
       registerWebNotificationClickHandler((payload) => {
-        if (payload.type === 'weekly_digest') {
-          onNavigate('home');
-          return;
-        }
-        if (payload.type === 'tip') {
+        if (payload.type === 'weekly_digest' || payload.type === 'tip') {
           onNavigate('home');
           return;
         }
@@ -89,18 +86,20 @@ export function usePushNotifications(onNavigate: NavigateFn): void {
 
     if (!isNativePushSupported()) return;
 
-    function openReportFromNotification(notification: Notifications.Notification) {
+    function openReportFromNotification(
+      notification: import('expo-notifications').Notification,
+    ) {
       openReportFromPayload(
         notification.request.content.data as Record<string, unknown> as WebNotificationPayload,
       );
     }
 
-    const lastResponse = Notifications.getLastNotificationResponse();
+    const lastResponse = getLastNotificationResponse();
     if (lastResponse?.notification) {
       openReportFromNotification(lastResponse.notification);
     }
 
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    const subscription = addNotificationResponseListener((response) => {
       openReportFromNotification(response.notification);
     });
 

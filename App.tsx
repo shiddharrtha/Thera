@@ -253,6 +253,7 @@ export default function App() {
         if (__DEV__) {
           console.error('[firebase] initialization failed', error);
         }
+        setFirebaseReady(true);
       });
   }, []);
 
