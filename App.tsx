@@ -169,7 +169,9 @@ function AppNavigator() {
   const showNav =
     user &&
     !AUTH_SCREENS.includes(screen) &&
-    !SETUP_SCREENS.includes(screen);
+    !SETUP_SCREENS.includes(screen) &&
+    screen !== 'scan' &&
+    screen !== 'processing';
   const screenProps = { onNavigate: navigate, onBack: goBack };
 
   const renderScreen = () => {
@@ -230,10 +232,17 @@ function AppNavigator() {
     );
   }
 
+  const isFullBleedScreen = screen === 'scan' || screen === 'processing';
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['top']}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor }]}
+      edges={isFullBleedScreen ? ['top', 'left', 'right'] : ['top']}
+    >
       <StatusBar style={statusBarStyle} />
-      <View style={styles.content}>{renderScreen()}</View>
+      <View style={[styles.content, isFullBleedScreen && styles.fullBleedContent]}>
+        {renderScreen()}
+      </View>
       {showNav && <BottomNav active={activeTab} onTab={handleTab} />}
     </SafeAreaView>
   );
@@ -275,9 +284,14 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    width: '100%',
   },
   content: {
     flex: 1,
+    width: '100%',
     alignSelf: 'stretch',
+  },
+  fullBleedContent: {
+    overflow: 'hidden',
   },
 });

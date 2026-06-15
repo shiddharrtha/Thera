@@ -7,10 +7,12 @@ import {
   StyleSheet,
   ActivityIndicator,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { CameraView } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ScreenProps } from '../types/navigation';
 import { useAppData } from '../context/AppDataContext';
 import { useFieldScanner } from '../hooks/useFieldScanner';
@@ -20,6 +22,8 @@ import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
 export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const { selectedFieldId, setSelectedFieldId, startScan, hasCompletedScans, getFieldsForSelectedFarm } = useAppData();
   const fields = getFieldsForSelectedFarm();
 
@@ -286,25 +290,37 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
   ];
 
   return (
-    <View style={styles.container}>
-      {isWeb ? (
-        <WebScanCamera videoRef={videoRef} style={StyleSheet.absoluteFill} />
-      ) : (
-        <CameraView
-          ref={cameraRef}
-          style={StyleSheet.absoluteFill}
-          facing="back"
-          mode="video"
-          mute
-          videoQuality="720p"
-          active
-          onCameraReady={markCameraReady}
-          onMountError={({ message }) => {
-            setCameraMountError(message);
-            if (__DEV__) console.warn('[scan] camera mount error', message);
-          }}
-        />
-      )}
+    <View
+      style={[
+        styles.container,
+        {
+          width: windowWidth,
+          height: windowHeight,
+          overflow: 'hidden',
+        },
+      ]}
+    >
+      <View style={styles.cameraLayer}>
+        {isWeb ? (
+          <WebScanCamera videoRef={videoRef} style={StyleSheet.absoluteFill} />
+        ) : (
+          <CameraView
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            facing="back"
+            mode="video"
+            mute
+            videoQuality="720p"
+            active
+            responsiveOrientationWhenOrientationLocked
+            onCameraReady={markCameraReady}
+            onMountError={({ message }) => {
+              setCameraMountError(message);
+              if (__DEV__) console.warn('[scan] camera mount error', message);
+            }}
+          />
+        )}
+      </View>
 
       <LinearGradient
         colors={['rgba(4,12,6,0.72)', 'transparent', 'rgba(5,13,7,0.85)']}
@@ -337,7 +353,7 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
         </View>
       )}
 
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
         <View style={styles.headerRow}>
           <TouchableOpacity
             style={styles.backBtnLight}
@@ -415,7 +431,7 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
 
       <View style={styles.spacer} />
 
-      <View style={styles.controls}>
+      <View style={[styles.controls, { paddingBottom: Math.max(insets.bottom, 24) }]}>
         {scannerError && <Text style={styles.errorBanner}>{scannerError}</Text>}
         {!permissionStatus.location && !isRecording ? (
           <TouchableOpacity onPress={() => void requestLocationOnly()} style={styles.locationPrompt}>
@@ -483,6 +499,11 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
 
 const styles = createStyles({
   container: { flex: 1, backgroundColor: colors.scanDark },
+  cameraLayer: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'hidden',
+    backgroundColor: colors.scanDark,
+  },
   emptyHeader: { paddingHorizontal: 20, paddingTop: 12 },
   selectorContainer: { flex: 1, backgroundColor: colors.background },
   selectorHeader: {
@@ -552,7 +573,7 @@ const styles = createStyles({
     borderRadius: 999,
   },
   recordingBannerText: { color: colors.white, fontSize: 13, fontWeight: '800' },
-  header: { paddingHorizontal: 20, paddingTop: 12, zIndex: 10 },
+  header: { paddingHorizontal: 20, zIndex: 10 },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
   headerText: { flex: 1 },
   title: { color: colors.white, fontWeight: '700', fontSize: 14 },
@@ -590,7 +611,7 @@ const styles = createStyles({
   progressTrack: { height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.15)', overflow: 'hidden' },
   progressFill: { height: '100%', backgroundColor: '#4ADE80', borderRadius: 4 },
   spacer: { flex: 1 },
-  controls: { paddingHorizontal: 20, paddingBottom: 32, zIndex: 10 },
+  controls: { paddingHorizontal: 20, zIndex: 10 },
   hint: { textAlign: 'center', color: 'rgba(255,255,255,0.5)', fontSize: 12, marginBottom: 24 },
   errorBanner: {
     textAlign: 'center',
