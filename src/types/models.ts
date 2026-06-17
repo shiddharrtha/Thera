@@ -14,6 +14,13 @@ export interface FarmProfile {
   approximateAcres: number;
 }
 
+export interface FarmerBackground {
+  /** Whole number of years the farmer has been farming. */
+  yearsFarming: string;
+  farmRole: string;
+  primaryGoals: string[];
+}
+
 export interface Farm {
   id: string;
   name: string;
@@ -145,6 +152,7 @@ export interface Report {
 
 export interface AppDataState {
   onboardingComplete: boolean;
+  farmerBackground?: FarmerBackground | null;
   /** @deprecated migrated to farms[] — may exist in old local storage */
   farmProfile?: FarmProfile | null;
   farms: Farm[];

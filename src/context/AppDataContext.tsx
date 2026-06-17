@@ -27,7 +27,7 @@ import {
   saveSelectedFarmId,
   updateFarmRemote,
 } from '../services/farm';
-import { fetchFarmProfile } from '../services/profile';
+import { fetchFarmProfile, fetchFarmerBackground, getProfileSaveErrorMessage } from '../services/profile';
 import { uploadScanVideoFile } from '../services/scanUpload';
 import {
   analyzeScanVideo,
@@ -40,6 +40,7 @@ import type {
   CostAssumptions,
   Farm,
   FarmProfile,
+  FarmerBackground,
   Field,
   Report,
   Scan,
@@ -206,6 +207,8 @@ interface AppDataContextValue {
   setSelectedScanId: (id: string | null) => void;
   setSelectedReportId: (id: string | null) => void;
   completeOnboarding: (profile: FarmProfile) => Promise<Farm>;
+  saveFarmDuringOnboarding: (profile: FarmProfile) => Promise<Farm>;
+  completeFarmerOnboarding: (background: FarmerBackground) => Promise<void>;
   addFarm: (profile: FarmProfile) => Promise<Farm>;
   switchFarm: (farmId: string) => Promise<void>;
   updateFarm: (farmId: string, patch: Partial<FarmProfile>) => Promise<void>;
@@ -379,11 +382,22 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         fields = normalizeFieldTimestamps(fields, scans);
         fields = syncFieldSavingsFromReports(fields, reports);
 
+        let farmerBackground = local.farmerBackground ?? null;
+        try {
+          const remoteBackground = await fetchFarmerBackground(user.uid);
+          if (remoteBackground) farmerBackground = remoteBackground;
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[profile] fetch farmer background failed', error);
+          }
+        }
+
         const merged = {
           ...local,
           farms,
           selectedFarmId,
           onboardingComplete,
+          farmerBackground,
           fields: normalizeFieldTimestamps(fields, scans),
           scans,
           reports,
@@ -437,7 +451,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       }
 
       const next = {
-        ...data,
+        ...dataRef.current,
         farms: [farm],
         selectedFarmId: farm.id,
         onboardingComplete: true,
@@ -445,7 +459,92 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       await persist(next);
       return farm;
     },
-    [data, persist, user, displayName],
+    [persist, user, displayName],
+  );
+
+  const saveFarmDuringOnboarding = useCallback(
+    async (profile: FarmProfile) => {
+      const current = dataRef.current;
+
+      if (current.farms.length > 0 && !current.onboardingComplete) {
+        const existing = current.farms[0];
+        let updated: Farm = {
+          ...farmFromProfile(profile, existing.id),
+          createdAt: existing.createdAt,
+        };
+
+        if (user) {
+          try {
+            updated = await updateFarmRemote(user, updated);
+            await saveSelectedFarmId(user, updated.id);
+          } catch (error) {
+            if (__DEV__) {
+              console.warn('[farm] update onboarding farm sync failed', error);
+            }
+          }
+        }
+
+        await mutateAppData((prev) => ({
+          ...prev,
+          farms: [updated],
+          selectedFarmId: updated.id,
+          onboardingComplete: false,
+        }));
+        return updated;
+      }
+
+      const farmId = createId('farm');
+      let farm = farmFromProfile(profile, farmId);
+
+      if (user) {
+        try {
+          farm = await createFarmRemote(user, farm);
+          await saveSelectedFarmId(user, farm.id);
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[farm] save onboarding farm sync failed', error);
+          }
+        }
+      }
+
+      await mutateAppData((prev) => ({
+        ...prev,
+        farms: [farm],
+        selectedFarmId: farm.id,
+        onboardingComplete: false,
+      }));
+      return farm;
+    },
+    [mutateAppData, user],
+  );
+
+  const completeFarmerOnboarding = useCallback(
+    async (background: FarmerBackground) => {
+      try {
+        const farm =
+          getSelectedFarm(dataRef.current.farms, dataRef.current.selectedFarmId) ??
+          dataRef.current.farms[0];
+        if (!farm) {
+          throw new Error('Farm profile is required before completing onboarding.');
+        }
+
+        if (user) {
+          await saveOnboardingFarm(user, farm, displayName, background);
+        }
+
+        await mutateAppData((prev) => ({
+          ...prev,
+          farmerBackground: background,
+          onboardingComplete: true,
+        }));
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('Farm profile is required')) {
+          throw error;
+        }
+        throw new Error(getProfileSaveErrorMessage(error));
+      }
+    },
+    [displayName, mutateAppData, user],
   );
 
   const addFarm = useCallback(
@@ -929,6 +1028,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       setSelectedScanId,
       setSelectedReportId,
       completeOnboarding,
+      saveFarmDuringOnboarding,
+      completeFarmerOnboarding,
       addFarm,
       switchFarm,
       updateFarm,
@@ -962,6 +1063,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       selectedScanId,
       selectedReportId,
       completeOnboarding,
+      saveFarmDuringOnboarding,
+      completeFarmerOnboarding,
       addFarm,
       switchFarm,
       updateFarm,

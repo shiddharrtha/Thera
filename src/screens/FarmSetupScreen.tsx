@@ -25,7 +25,7 @@ import { createStyles } from '../theme/createStyles';
 import type { Units } from '../types/models';
 
 export function FarmSetupScreen({ onNavigate }: ScreenProps) {
-  const { completeOnboarding } = useAppData();
+  const { saveFarmDuringOnboarding } = useAppData();
   const [farmName, setFarmName] = useState('');
   const [regionSelection, setRegionSelection] = useState<RegionOption>('Iowa');
   const [otherRegion, setOtherRegion] = useState('');
@@ -50,21 +50,21 @@ export function FarmSetupScreen({ onNavigate }: ScreenProps) {
 
     setBusy(true);
     try {
-      await completeOnboarding({
+      await saveFarmDuringOnboarding({
         farmName: farmName.trim() || 'My Farm',
         region,
         defaultCrop,
         units,
         approximateAcres: Number(approxAcres) || 0,
       });
-      onNavigate('home');
+      onNavigate('farmer-background', { replace: true });
     } catch (error) {
       const message = getFarmSaveErrorMessage(error);
       if (message.includes('db:migrate-farms') || message.includes('Farms table is missing')) {
         Alert.alert(
           'Saved on this device',
           `${message}\n\nYour farm profile is saved locally. After running the migration, reopen the app to sync to Supabase.`,
-          [{ text: 'Continue', onPress: () => onNavigate('home') }],
+          [{ text: 'Continue', onPress: () => onNavigate('farmer-background', { replace: true }) }],
         );
         return;
       }
@@ -80,7 +80,7 @@ export function FarmSetupScreen({ onNavigate }: ScreenProps) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={styles.header}>
-        <Text style={styles.stepLabel}>Farm Profile</Text>
+        <Text style={styles.stepLabel}>Step 1 of 2 · Farm Profile</Text>
         <Text style={styles.title}>Set up your farm</Text>
       </View>
 

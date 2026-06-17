@@ -1,5 +1,3 @@
-import { supabase } from '../lib/supabase';
-
 export const SCAN_REPORTS_CHANNEL_ID = 'scan-reports';
 
 export type NotificationPayload = {
@@ -41,26 +39,4 @@ export function parseNavigableNotificationData(
     };
   }
   return null;
-}
-
-export async function saveExpoPushToken(userId: string, token: string): Promise<void> {
-  const { error } = await supabase
-    .from('profiles')
-    .update({ expo_push_token: token })
-    .eq('id', userId);
-
-  if (error && __DEV__) {
-    console.warn('[push] Could not save push token', error);
-  }
-}
-
-export async function clearExpoPushToken(userId: string): Promise<void> {
-  const { error } = await supabase
-    .from('profiles')
-    .update({ expo_push_token: null })
-    .eq('id', userId);
-
-  if (error && __DEV__) {
-    console.warn('[push] Could not clear push token', error);
-  }
 }

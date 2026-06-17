@@ -1,7 +1,7 @@
 import type { AuthUser } from './auth';
 import { firebaseAuth } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
-import type { Farm, FarmProfile, Units } from '../types/models';
+import type { Farm, FarmProfile, Units, FarmerBackground } from '../types/models';
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -166,11 +166,12 @@ export async function updateFarmRemote(user: AuthUser, farm: Farm): Promise<Farm
   });
 }
 
-/** Mark onboarding complete and sync legacy profile farm columns. */
+/** Mark onboarding complete and sync profile farm + farmer background columns. */
 export async function saveOnboardingFarm(
   user: AuthUser,
   farm: Farm,
   fullName?: string | null,
+  background?: FarmerBackground,
 ) {
   return withAuthRetry(async () => {
     const email = user.email;
@@ -188,6 +189,9 @@ export async function saveOnboardingFarm(
         approximate_acres: farm.approximateAcres,
         selected_farm_id: farm.id,
         onboarding_complete: true,
+        years_farming: background?.yearsFarming ?? null,
+        farm_role: background?.farmRole ?? null,
+        primary_goals: background?.primaryGoals ?? null,
       },
       { onConflict: 'id' },
     );

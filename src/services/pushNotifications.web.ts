@@ -1,8 +1,6 @@
 import {
-  clearExpoPushToken,
   parseNavigableNotificationData,
   parseScanReportNotificationData,
-  saveExpoPushToken,
   SCAN_REPORTS_CHANNEL_ID,
   type NotificationPayload,
   type ScanReportNotificationData,
@@ -15,11 +13,9 @@ import {
 } from './webNotifications';
 
 export {
-  clearExpoPushToken,
   isWebNotificationsSupported,
   parseNavigableNotificationData,
   parseScanReportNotificationData,
-  saveExpoPushToken,
   SCAN_REPORTS_CHANNEL_ID,
 };
 export type { NotificationPayload, ScanReportNotificationData };
@@ -61,14 +57,6 @@ export async function deliverNotification(options: {
   if (!granted) return;
 
   showWebNotification(options.title, options.body, options.data, options.tag);
-}
-
-export async function registerForPushNotifications(): Promise<string | null> {
-  return null;
-}
-
-export async function syncPushTokenForUser(_userId: string): Promise<string | null> {
-  return null;
 }
 
 export async function notifyScanReportReady(options: {

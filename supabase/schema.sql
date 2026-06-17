@@ -9,6 +9,9 @@ create table if not exists public.profiles (
   default_crop text,
   preferred_units text check (preferred_units in ('imperial', 'metric')),
   approximate_acres numeric,
+  years_farming text,
+  farm_role text,
+  primary_goals text[],
   onboarding_complete boolean not null default false,
   created_at timestamptz not null default now()
 );

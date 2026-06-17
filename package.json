@@ -51,11 +51,12 @@
     "eas": "eas",
     "email:setup": "node scripts/setup-resend-email.mjs",
     "db:migrate-farm-profile": "node scripts/apply-farm-profile-migration.mjs",
+    "db:migrate-farmer-background": "node scripts/apply-farmer-background-migration.mjs",
     "db:migrate-farms": "node scripts/apply-farms-migration.mjs",
     "db:migrate-fields-scans": "node scripts/apply-fields-scans-migration.mjs",
     "db:migrate-scan-video": "node scripts/apply-scan-video-migration.mjs",
     "db:migrate-recorded-at-ms": "node scripts/apply-recorded-at-ms-migration.mjs",
-    "db:migrate-push-notifications": "node scripts/apply-push-notifications-migration.mjs",
+    "db:remove-expo-push-token": "node scripts/apply-remove-expo-push-token-migration.mjs",
     "analysis:dev": "cd backend && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload",
     "analysis:setup": "cd backend && python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt"
   },

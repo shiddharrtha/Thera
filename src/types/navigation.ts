@@ -4,6 +4,7 @@ export type Screen =
   | 'signup'
   | 'forgot-password'
   | 'setup'
+  | 'farmer-background'
   | 'home'
   | 'scan'
   | 'processing'

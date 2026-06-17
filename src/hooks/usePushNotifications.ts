@@ -1,16 +1,13 @@
 import { useEffect, useRef } from 'react';
-import { useAuth } from '../context/AuthContext';
 import { useAppData } from '../context/AppDataContext';
 import type { Screen } from '../types/navigation';
 import {
   addNotificationResponseListener,
-  clearExpoPushToken,
   configureNotificationHandler,
   getLastNotificationResponse,
   isNativePushSupported,
   isWebNotificationsSupported,
   parseNavigableNotificationData,
-  syncPushTokenForUser,
 } from '../services/pushNotifications';
 import {
   registerWebNotificationClickHandler,
@@ -21,7 +18,6 @@ import { useNotificationScheduler } from './useNotificationScheduler';
 type NavigateFn = (screen: Screen) => void;
 
 export function usePushNotifications(onNavigate: NavigateFn): void {
-  const { user } = useAuth();
   const {
     data,
     setSelectedReportId,
@@ -35,25 +31,8 @@ export function usePushNotifications(onNavigate: NavigateFn): void {
     configureNotificationHandler();
   }, []);
 
-  const previousUserIdRef = useRef<string | undefined>();
   const reportsRef = useRef(data.reports);
   reportsRef.current = data.reports;
-
-  useEffect(() => {
-    const previousUserId = previousUserIdRef.current;
-    previousUserIdRef.current = user?.uid;
-
-    if (previousUserId && previousUserId !== user?.uid) {
-      void clearExpoPushToken(previousUserId);
-    }
-  }, [user?.uid]);
-
-  useEffect(() => {
-    if (!user || !isNativePushSupported()) return;
-    if (!data.settings.scanCompletedNotifications) return;
-
-    void syncPushTokenForUser(user.uid);
-  }, [user, data.settings.scanCompletedNotifications]);
 
   useEffect(() => {
     function openReportFromPayload(payload: WebNotificationPayload) {

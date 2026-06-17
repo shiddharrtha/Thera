@@ -12,10 +12,8 @@ import { FarmProfileFieldModal, type FarmProfileEditField } from '../components/
 import { farmToProfile } from '../utils/farmHelpers';
 import type { UserSettings } from '../types/models';
 import {
-  isNativePushSupported,
   isNotificationsSupported,
   requestNotificationPermission,
-  syncPushTokenForUser,
 } from '../services/pushNotifications';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
@@ -119,10 +117,6 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
           'Allow notifications in your browser or device settings to receive Thera alerts.',
         );
         return;
-      }
-
-      if (key === 'scanCompletedNotifications' && user && isNativePushSupported()) {
-        await syncPushTokenForUser(user.uid);
       }
     }
 

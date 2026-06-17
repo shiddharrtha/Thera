@@ -1,7 +1,7 @@
 import type { AuthUser } from './auth';
 import { firebaseAuth } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
-import type { FarmProfile, Units } from '../types/models';
+import type { FarmProfile, Units, FarmerBackground } from '../types/models';
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -43,11 +43,11 @@ export function getProfileSaveErrorMessage(error: unknown): string {
   if (
     code === 'PGRST204' ||
     code === '42703' ||
-    /farm_name|primary_region|default_crop|preferred_units|approximate_acres|onboarding_complete|expo_push_token/i.test(
+    /farm_name|primary_region|default_crop|preferred_units|approximate_acres|onboarding_complete|years_farming|farm_role|primary_goals/i.test(
       message,
     )
   ) {
-    return 'Farm profile columns are missing in Supabase. Run: npm run db:migrate-farm-profile (add SUPABASE_DB_URL to .env first).';
+    return 'Farm profile columns are missing in Supabase. Run: npm run db:migrate-farm-profile and npm run db:migrate-farmer-background (add SUPABASE_DB_URL to .env first).';
   }
 
   if (code === '42501') {
@@ -59,6 +59,76 @@ export function getProfileSaveErrorMessage(error: unknown): string {
   }
 
   return message;
+}
+
+/** Persist farmer background fields to the Supabase profiles table. */
+export async function saveFarmerBackground(user: AuthUser, background: FarmerBackground) {
+  const delays = [0, 1500, 3000, 5000, 8000];
+  let lastError: unknown;
+
+  for (const delay of delays) {
+    if (delay > 0) await sleep(delay);
+    await refreshFirebaseToken(true);
+
+    try {
+      const email = user.email;
+      if (!email) throw new Error('Missing email for profile save.');
+
+      const { error } = await supabase.from('profiles').upsert(
+        {
+          id: user.uid,
+          email,
+          years_farming: background.yearsFarming,
+          farm_role: background.farmRole,
+          primary_goals: background.primaryGoals,
+        },
+        { onConflict: 'id' },
+      );
+
+      if (error) throw error;
+      return;
+    } catch (error) {
+      lastError = error;
+      if (__DEV__) {
+        console.warn('[profile] save farmer background attempt failed', error);
+      }
+    }
+  }
+
+  throw lastError ?? new Error('Could not save farmer background.');
+}
+
+/** Load farmer background from Supabase for the signed-in user. */
+export async function fetchFarmerBackground(userId: string): Promise<FarmerBackground | null> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('years_farming, farm_role, primary_goals')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (error) {
+    const code = (error as { code?: string }).code;
+    const message = error.message ?? '';
+    if (
+      code === 'PGRST204' ||
+      code === '42703' ||
+      /years_farming|farm_role|primary_goals/i.test(message)
+    ) {
+      return null;
+    }
+    throw error;
+  }
+
+  if (!data?.years_farming?.trim()) return null;
+
+  const years = Number(data.years_farming);
+  if (!Number.isFinite(years) || years < 0) return null;
+
+  return {
+    yearsFarming: String(Math.round(years)),
+    farmRole: data.farm_role?.trim() || '',
+    primaryGoals: Array.isArray(data.primary_goals) ? data.primary_goals : [],
+  };
 }
 
 async function upsertFarmProfileRow(

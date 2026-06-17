@@ -1,22 +1,16 @@
-import Constants from 'expo-constants';
-import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import {
-  clearExpoPushToken,
   parseNavigableNotificationData,
   parseScanReportNotificationData,
-  saveExpoPushToken,
   SCAN_REPORTS_CHANNEL_ID,
   type NotificationPayload,
   type ScanReportNotificationData,
 } from './notificationShared';
 
 export {
-  clearExpoPushToken,
   parseNavigableNotificationData,
   parseScanReportNotificationData,
-  saveExpoPushToken,
   SCAN_REPORTS_CHANNEL_ID,
 };
 export type { NotificationPayload, ScanReportNotificationData };
@@ -65,14 +59,6 @@ async function ensureAndroidChannel(): Promise<void> {
   });
 }
 
-function getEasProjectId(): string | null {
-  const projectId =
-    Constants.expoConfig?.extra?.eas?.projectId ??
-    Constants.easConfig?.projectId ??
-    process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
-  return projectId?.trim() || null;
-}
-
 export async function getNotificationPermissionStatus(): Promise<string> {
   const { status } = await Notifications.getPermissionsAsync();
   return status;
@@ -112,44 +98,6 @@ export async function deliverNotification(options: {
     },
     trigger: null,
   });
-}
-
-export async function registerForPushNotifications(): Promise<string | null> {
-  if (!Device.isDevice) {
-    if (__DEV__) {
-      console.warn('[push] Push tokens require a physical device.');
-    }
-    return null;
-  }
-
-  const granted = await requestNotificationPermission();
-  if (!granted) return null;
-
-  const projectId = getEasProjectId();
-  if (!projectId) {
-    if (__DEV__) {
-      console.warn('[push] Set EXPO_PUBLIC_EAS_PROJECT_ID (run: npx eas init).');
-    }
-    return null;
-  }
-
-  try {
-    const token = await Notifications.getExpoPushTokenAsync({ projectId });
-    return token.data;
-  } catch (error) {
-    if (__DEV__) {
-      console.warn('[push] Could not get Expo push token', error);
-    }
-    return null;
-  }
-}
-
-export async function syncPushTokenForUser(userId: string): Promise<string | null> {
-  const token = await registerForPushNotifications();
-  if (token) {
-    await saveExpoPushToken(userId, token);
-  }
-  return token;
 }
 
 export async function notifyScanReportReady(options: {

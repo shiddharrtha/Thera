@@ -13,6 +13,7 @@ import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
 import { ForgotPasswordScreen } from './src/screens/ForgotPasswordScreen';
 import { FarmSetupScreen } from './src/screens/FarmSetupScreen';
+import { FarmerBackgroundScreen } from './src/screens/FarmerBackgroundScreen';
 import { AddFarmScreen } from './src/screens/AddFarmScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { ScanScreen } from './src/screens/ScanScreen';
@@ -31,7 +32,18 @@ import { usePushNotifications } from './src/hooks/usePushNotifications';
 import { colors } from './src/theme/colors';
 
 const AUTH_SCREENS: Screen[] = ['splash', 'login', 'signup', 'forgot-password'];
-const SETUP_SCREENS: Screen[] = ['setup'];
+const SETUP_SCREENS: Screen[] = ['setup', 'farmer-background'];
+
+const ONBOARDING_NEXT: Partial<Record<Screen, Screen[]>> = {
+  setup: ['farmer-background'],
+  'farmer-background': ['home'],
+};
+
+function getOnboardingScreen(data: { onboardingComplete: boolean; farms: { id: string }[] }): Screen {
+  if (data.onboardingComplete) return 'home';
+  if (data.farms.length > 0) return 'farmer-background';
+  return 'setup';
+}
 
 const TAB_SCREEN_MAP: Record<NavTab, Screen> = {
   home: 'home',
@@ -57,6 +69,11 @@ function AppNavigator() {
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [history, setHistory] = useState<Screen[]>([]);
   const navigateRef = useRef<(s: Screen, options?: NavigateOptions) => void>(() => {});
+  const dataRef = useRef(data);
+
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
   usePushNotifications((screen) => navigateRef.current(screen));
 
@@ -107,6 +124,7 @@ function AppNavigator() {
   }, [user, authLoading, dataLoading, data.onboardingComplete, resetForSignOut]);
 
   const navigate = (s: Screen, options?: NavigateOptions) => {
+    const appData = dataRef.current;
     if (!user && !AUTH_SCREENS.includes(s)) return;
 
     if (user && screen === 'splash' && s === 'login') {
@@ -130,14 +148,21 @@ function AppNavigator() {
 
     if (user && AUTH_SCREENS.includes(s)) return;
 
-    if (user && (s === 'home' || s === 'setup')) {
+    if (user && (s === 'home' || s === 'setup' || s === 'farmer-background')) {
       setHistory([]);
       setActiveTab('home');
-      setScreen(s === 'setup' || !data.onboardingComplete || data.farms.length === 0 ? 'setup' : 'home');
+      if (s === 'home') {
+        setScreen(getOnboardingScreen(appData));
+      } else {
+        setScreen(s);
+      }
       return;
     }
 
-    if (user && !data.onboardingComplete && SETUP_SCREENS.includes(screen) && s !== 'add-field') return;
+    if (user && !appData.onboardingComplete && SETUP_SCREENS.includes(screen)) {
+      const allowed = ONBOARDING_NEXT[screen] ?? [];
+      if (!allowed.includes(s) && s !== 'add-field') return;
+    }
 
     const tab = SCREEN_TO_TAB[s];
     if (tab) setActiveTab(tab);
@@ -154,7 +179,7 @@ function AppNavigator() {
 
   const goBack = () => {
     const h = [...history];
-    const prev = h.pop() ?? (user ? (data.onboardingComplete ? 'home' : 'setup') : 'splash');
+    const prev = h.pop() ?? (user ? getOnboardingScreen(dataRef.current) : 'splash');
     setHistory(h);
     setScreen(prev);
   };
@@ -186,6 +211,8 @@ function AppNavigator() {
         return <ForgotPasswordScreen onNavigate={navigate} />;
       case 'setup':
         return <FarmSetupScreen {...screenProps} />;
+      case 'farmer-background':
+        return <FarmerBackgroundScreen {...screenProps} />;
       case 'home':
         return <HomeScreen {...screenProps} />;
       case 'scan':
