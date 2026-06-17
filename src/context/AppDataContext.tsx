@@ -27,7 +27,7 @@ import {
   saveSelectedFarmId,
   updateFarmRemote,
 } from '../services/farm';
-import { fetchFarmProfile, fetchFarmerBackground, getProfileSaveErrorMessage } from '../services/profile';
+import { fetchFarmProfile, fetchFarmerBackground, getProfileSaveErrorMessage, saveFarmerBackground } from '../services/profile';
 import { uploadScanVideoFile } from '../services/scanUpload';
 import {
   analyzeScanVideo,
@@ -200,6 +200,8 @@ function buildCompletedScanState(
 interface AppDataContextValue {
   loading: boolean;
   data: AppDataState;
+  /** Latest app data (includes changes before the next React render). */
+  getDataSnapshot: () => AppDataState;
   selectedFieldId: string | null;
   selectedScanId: string | null;
   selectedReportId: string | null;
@@ -209,6 +211,7 @@ interface AppDataContextValue {
   completeOnboarding: (profile: FarmProfile) => Promise<Farm>;
   saveFarmDuringOnboarding: (profile: FarmProfile) => Promise<Farm>;
   completeFarmerOnboarding: (background: FarmerBackground) => Promise<void>;
+  updateFarmerBackground: (background: FarmerBackground) => Promise<void>;
   addFarm: (profile: FarmProfile) => Promise<Farm>;
   switchFarm: (farmId: string) => Promise<void>;
   updateFarm: (farmId: string, patch: Partial<FarmProfile>) => Promise<void>;
@@ -545,6 +548,20 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       }
     },
     [displayName, mutateAppData, user],
+  );
+
+  const updateFarmerBackground = useCallback(
+    async (background: FarmerBackground) => {
+      if (user) {
+        await saveFarmerBackground(user, background);
+      }
+
+      await mutateAppData((prev) => ({
+        ...prev,
+        farmerBackground: background,
+      }));
+    },
+    [mutateAppData, user],
   );
 
   const addFarm = useCallback(
@@ -1017,10 +1034,13 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setSelectedReportId(null);
   }, []);
 
+  const getDataSnapshot = useCallback(() => dataRef.current, []);
+
   const value = useMemo<AppDataContextValue>(
     () => ({
       loading,
       data,
+      getDataSnapshot,
       selectedFieldId,
       selectedScanId,
       selectedReportId,
@@ -1030,6 +1050,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       completeOnboarding,
       saveFarmDuringOnboarding,
       completeFarmerOnboarding,
+      updateFarmerBackground,
       addFarm,
       switchFarm,
       updateFarm,
@@ -1059,12 +1080,14 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     [
       loading,
       data,
+      getDataSnapshot,
       selectedFieldId,
       selectedScanId,
       selectedReportId,
       completeOnboarding,
       saveFarmDuringOnboarding,
       completeFarmerOnboarding,
+      updateFarmerBackground,
       addFarm,
       switchFarm,
       updateFarm,

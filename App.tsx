@@ -64,16 +64,11 @@ const SCREEN_TO_TAB: Partial<Record<Screen, NavTab>> = {
 
 function AppNavigator() {
   const { user, loading: authLoading } = useAuth();
-  const { loading: dataLoading, data, resetForSignOut } = useAppData();
+  const { loading: dataLoading, data, getDataSnapshot, resetForSignOut } = useAppData();
   const [screen, setScreen] = useState<Screen>('splash');
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [history, setHistory] = useState<Screen[]>([]);
   const navigateRef = useRef<(s: Screen, options?: NavigateOptions) => void>(() => {});
-  const dataRef = useRef(data);
-
-  useEffect(() => {
-    dataRef.current = data;
-  }, [data]);
 
   usePushNotifications((screen) => navigateRef.current(screen));
 
@@ -124,7 +119,7 @@ function AppNavigator() {
   }, [user, authLoading, dataLoading, data.onboardingComplete, resetForSignOut]);
 
   const navigate = (s: Screen, options?: NavigateOptions) => {
-    const appData = dataRef.current;
+    const appData = getDataSnapshot();
     if (!user && !AUTH_SCREENS.includes(s)) return;
 
     if (user && screen === 'splash' && s === 'login') {
@@ -179,7 +174,7 @@ function AppNavigator() {
 
   const goBack = () => {
     const h = [...history];
-    const prev = h.pop() ?? (user ? getOnboardingScreen(dataRef.current) : 'splash');
+    const prev = h.pop() ?? (user ? getOnboardingScreen(getDataSnapshot()) : 'splash');
     setHistory(h);
     setScreen(prev);
   };

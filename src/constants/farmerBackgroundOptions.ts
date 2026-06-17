@@ -15,3 +15,16 @@ export const PRIMARY_GOAL_OPTIONS = [
 
 export type FarmRoleOption = (typeof FARM_ROLE_OPTIONS)[number];
 export type PrimaryGoalOption = (typeof PRIMARY_GOAL_OPTIONS)[number];
+
+export function resolveFarmRoleSelection(
+  role?: string,
+  fallback: FarmRoleOption = 'Farm owner / operator',
+): { selection: FarmRoleOption; other: string } {
+  if (role && (FARM_ROLE_OPTIONS as readonly string[]).includes(role)) {
+    return { selection: role as FarmRoleOption, other: '' };
+  }
+  if (role?.trim()) {
+    return { selection: 'Other', other: role.trim() };
+  }
+  return { selection: fallback, other: '' };
+}

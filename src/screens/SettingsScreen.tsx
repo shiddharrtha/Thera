@@ -84,7 +84,7 @@ function Section({ title, children }: { title?: string; children: React.ReactNod
 
 export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
   const { user, displayName, signOut, updateDisplayName } = useAuth();
-  const { data, updateSettings, updateFarmProfile, getSelectedFarm, switchFarm } = useAppData();
+  const { data, updateSettings, updateFarmProfile, updateFarmerBackground, getSelectedFarm, switchFarm } = useAppData();
   const settings = data.settings;
   const selectedFarm = getSelectedFarm();
   const farm = selectedFarm ? farmToProfile(selectedFarm) : null;
@@ -155,11 +155,19 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
     fullName: string;
     farmName: string;
     region: string;
+    yearsFarming: string;
+    farmRole: string;
+    primaryGoals: string[];
   }) => {
     await updateDisplayName(values.fullName);
     await updateFarmProfile({
       farmName: values.farmName,
       region: values.region,
+    });
+    await updateFarmerBackground({
+      yearsFarming: values.yearsFarming,
+      farmRole: values.farmRole,
+      primaryGoals: values.primaryGoals,
     });
   };
 
@@ -319,6 +327,7 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
         fullName={resolvedName}
         email={email}
         farm={farm}
+        farmerBackground={data.farmerBackground ?? null}
         onClose={() => setAccountEditorOpen(false)}
         onSave={handleSaveAccountProfile}
       />

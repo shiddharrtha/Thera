@@ -20,15 +20,24 @@ import {
   resolveChipValue,
   type RegionOption,
 } from '../constants/farmFormOptions';
+import {
+  FARM_ROLE_OPTIONS,
+  PRIMARY_GOAL_OPTIONS,
+  resolveFarmRoleSelection,
+  type FarmRoleOption,
+} from '../constants/farmerBackgroundOptions';
 import { getProfileSaveErrorMessage } from '../services/profile';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
-import type { FarmProfile } from '../types/models';
+import type { FarmProfile, FarmerBackground } from '../types/models';
 
 export interface AccountProfileFormValues {
   fullName: string;
   farmName: string;
   region: string;
+  yearsFarming: string;
+  farmRole: string;
+  primaryGoals: string[];
 }
 
 interface AccountProfileModalProps {
@@ -36,6 +45,7 @@ interface AccountProfileModalProps {
   fullName: string;
   email: string;
   farm: FarmProfile | null;
+  farmerBackground: FarmerBackground | null;
   onClose: () => void;
   onSave: (values: AccountProfileFormValues) => Promise<void>;
 }
@@ -45,6 +55,7 @@ export function AccountProfileModal({
   fullName,
   email,
   farm,
+  farmerBackground,
   onClose,
   onSave,
 }: AccountProfileModalProps) {
@@ -52,7 +63,17 @@ export function AccountProfileModal({
   const [farmName, setFarmName] = useState('');
   const [regionSelection, setRegionSelection] = useState<RegionOption>('Iowa');
   const [otherRegion, setOtherRegion] = useState('');
+  const [yearsFarming, setYearsFarming] = useState('');
+  const [farmRole, setFarmRole] = useState<FarmRoleOption>('Farm owner / operator');
+  const [otherRole, setOtherRole] = useState('');
+  const [primaryGoals, setPrimaryGoals] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+
+  const toggleGoal = (goal: string) => {
+    setPrimaryGoals((current) =>
+      current.includes(goal) ? current.filter((g) => g !== goal) : [...current, goal],
+    );
+  };
 
   useEffect(() => {
     if (!visible) return;
@@ -63,12 +84,22 @@ export function AccountProfileModal({
     const region = resolveChipSelection(REGION_OPTIONS, farm?.region, 'Iowa');
     setRegionSelection(region.selection);
     setOtherRegion(region.other);
-  }, [visible, fullName, farm]);
+
+    setYearsFarming(farmerBackground?.yearsFarming ?? '');
+
+    const role = resolveFarmRoleSelection(farmerBackground?.farmRole);
+    setFarmRole(role.selection);
+    setOtherRole(role.other);
+
+    setPrimaryGoals(farmerBackground?.primaryGoals ?? []);
+  }, [visible, fullName, farm, farmerBackground]);
 
   const handleSave = async () => {
     const trimmedName = name.trim();
     const trimmedFarmName = farmName.trim();
     const region = resolveChipValue(regionSelection, otherRegion);
+    const resolvedRole = farmRole === 'Other' ? otherRole.trim() : farmRole;
+    const years = Number(yearsFarming.trim());
 
     if (!trimmedName) {
       Alert.alert('Missing information', 'Please enter your name.');
@@ -82,6 +113,22 @@ export function AccountProfileModal({
       Alert.alert('Missing information', 'Please enter your region.');
       return;
     }
+    if (!yearsFarming.trim() || !Number.isFinite(years) || years < 0) {
+      Alert.alert('Missing information', 'Please enter how many years you have been farming.');
+      return;
+    }
+    if (years > 100) {
+      Alert.alert('Invalid entry', 'Please enter a realistic number of years farming.');
+      return;
+    }
+    if (farmRole === 'Other' && !resolvedRole) {
+      Alert.alert('Missing information', 'Please describe your role on the farm.');
+      return;
+    }
+    if (primaryGoals.length === 0) {
+      Alert.alert('Missing information', 'Select at least one goal for using Thera.');
+      return;
+    }
 
     setBusy(true);
     try {
@@ -89,6 +136,9 @@ export function AccountProfileModal({
         fullName: trimmedName,
         farmName: trimmedFarmName,
         region,
+        yearsFarming: String(Math.round(years)),
+        farmRole: resolvedRole,
+        primaryGoals,
       });
       onClose();
     } catch (error) {
@@ -155,6 +205,61 @@ export function AccountProfileModal({
                 autoCapitalize="words"
               />
             )}
+
+            <Text style={styles.sectionLabel}>Farmer background</Text>
+
+            <Text style={styles.fieldLabel}>How many years have you been farming?</Text>
+            <FloatingInput
+              label="Years farming"
+              value={yearsFarming}
+              onChange={setYearsFarming}
+              keyboardType="numeric"
+              placeholder="e.g. 12"
+            />
+
+            <Text style={styles.fieldLabel}>What's your role?</Text>
+            <View style={styles.chipRow}>
+              {FARM_ROLE_OPTIONS.map((option) => (
+                <TouchableOpacity
+                  key={option}
+                  style={[styles.chip, farmRole === option && styles.chipActive]}
+                  onPress={() => {
+                    setFarmRole(option);
+                    if (option !== 'Other') setOtherRole('');
+                  }}
+                >
+                  <Text style={[styles.chipText, farmRole === option && styles.chipTextActive]}>
+                    {option}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {farmRole === 'Other' && (
+              <FloatingInput
+                label="Describe your role"
+                value={otherRole}
+                onChange={setOtherRole}
+                placeholder="e.g. Custom applicator, crop scout"
+                autoCapitalize="words"
+              />
+            )}
+
+            <Text style={styles.fieldLabel}>What do you want Thera to help with?</Text>
+            <Text style={styles.fieldHint}>Select all that apply</Text>
+            <View style={styles.chipRow}>
+              {PRIMARY_GOAL_OPTIONS.map((goal) => {
+                const selected = primaryGoals.includes(goal);
+                return (
+                  <TouchableOpacity
+                    key={goal}
+                    style={[styles.chip, selected && styles.chipActive]}
+                    onPress={() => toggleGoal(goal)}
+                  >
+                    <Text style={[styles.chipText, selected && styles.chipTextActive]}>{goal}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </ScrollView>
 
           <TouchableOpacity onPress={() => void handleSave()} disabled={busy}>
@@ -199,8 +304,16 @@ const styles = createStyles({
     borderRadius: 12,
     backgroundColor: colors.background,
   },
-  sheetBody: { maxHeight: 420, marginBottom: 16 },
-  fieldLabel: { fontSize: 12, fontWeight: '600', color: colors.gray700, marginBottom: 8 },
+  sheetBody: { maxHeight: 520, marginBottom: 16 },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.gray900,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  fieldLabel: { fontSize: 12, fontWeight: '600', color: colors.gray700, marginBottom: 8, marginTop: 4 },
+  fieldHint: { fontSize: 11, color: colors.gray400, marginTop: -4, marginBottom: 8 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   chip: {
     paddingHorizontal: 12,
