@@ -83,7 +83,7 @@ function Section({ title, children }: { title?: string; children: React.ReactNod
 }
 
 export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
-  const { user, displayName, signOut, updateDisplayName } = useAuth();
+  const { user, displayName, signOut, updateDisplayName, updateAccountEmail } = useAuth();
   const { data, updateSettings, updateFarmProfile, updateFarmerBackground, getSelectedFarm, switchFarm } = useAppData();
   const settings = data.settings;
   const selectedFarm = getSelectedFarm();
@@ -153,6 +153,8 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
 
   const handleSaveAccountProfile = async (values: {
     fullName: string;
+    email: string;
+    currentPassword?: string;
     farmName: string;
     region: string;
     yearsFarming: string;
@@ -164,6 +166,16 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
     farmRole: string;
     primaryGoals: string[];
   }) => {
+    const currentEmail = (user?.email ?? '').trim().toLowerCase();
+    const nextEmail = values.email.trim().toLowerCase();
+
+    if (nextEmail !== currentEmail) {
+      if (!values.currentPassword) {
+        throw new Error('Enter your current password to change your email.');
+      }
+      await updateAccountEmail(values.email, values.currentPassword);
+    }
+
     await updateDisplayName(values.fullName);
     await updateFarmProfile({
       farmName: values.farmName,

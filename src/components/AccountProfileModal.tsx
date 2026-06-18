@@ -26,14 +26,21 @@ import {
   resolveFarmRoleSelection,
   type FarmRoleOption,
 } from '../constants/farmerBackgroundOptions';
+import { getAuthErrorMessage } from '../services/auth';
 import { getProfileSaveErrorMessage } from '../services/profile';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 import type { FarmProfile, FarmerBackground } from '../types/models';
 import { resolveMainCropSelection, validateFarmerBackgroundInput } from '../utils/farmerBackgroundForm';
 
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 export interface AccountProfileFormValues {
   fullName: string;
+  email: string;
+  currentPassword?: string;
   farmName: string;
   region: string;
   yearsFarming: string;
@@ -66,6 +73,8 @@ export function AccountProfileModal({
   onSave,
 }: AccountProfileModalProps) {
   const [name, setName] = useState('');
+  const [emailAddress, setEmailAddress] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [farmName, setFarmName] = useState('');
   const [regionSelection, setRegionSelection] = useState<RegionOption>('Iowa');
   const [otherRegion, setOtherRegion] = useState('');
@@ -91,6 +100,9 @@ export function AccountProfileModal({
     if (!visible) return;
 
     setName(fullName);
+    setEmailAddress(email);
+    setCurrentPassword('');
+
     setFarmName(farm?.farmName ?? '');
 
     const region = resolveChipSelection(REGION_OPTIONS, farm?.region, 'Iowa');
@@ -112,15 +124,31 @@ export function AccountProfileModal({
     setOtherRole(role.other);
 
     setPrimaryGoals(farmerBackground?.primaryGoals ?? []);
-  }, [visible, fullName, farm, farmerBackground]);
+  }, [visible, fullName, email, farm, farmerBackground]);
+
+  const emailChanged =
+    emailAddress.trim().toLowerCase() !== (email || '').trim().toLowerCase();
 
   const handleSave = async () => {
     const trimmedName = name.trim();
+    const trimmedEmail = emailAddress.trim();
     const trimmedFarmName = farmName.trim();
     const region = resolveChipValue(regionSelection, otherRegion);
 
     if (!trimmedName) {
       Alert.alert('Missing information', 'Please enter your name.');
+      return;
+    }
+    if (!trimmedEmail) {
+      Alert.alert('Missing information', 'Please enter your email address.');
+      return;
+    }
+    if (!isValidEmail(trimmedEmail)) {
+      Alert.alert('Invalid email', 'Please enter a valid email address.');
+      return;
+    }
+    if (emailChanged && !currentPassword) {
+      Alert.alert('Password required', 'Enter your current password to change your email.');
       return;
     }
     if (!trimmedFarmName) {
@@ -154,13 +182,20 @@ export function AccountProfileModal({
     try {
       await onSave({
         fullName: trimmedName,
+        email: trimmedEmail,
+        ...(emailChanged ? { currentPassword } : {}),
         farmName: trimmedFarmName,
         region,
         ...farmerResult.value,
       });
       onClose();
     } catch (error) {
-      Alert.alert('Could not save', getProfileSaveErrorMessage(error));
+      const code = (error as { code?: string })?.code;
+      const message =
+        code?.startsWith('auth/') || code?.startsWith('functions/')
+          ? getAuthErrorMessage(error)
+          : getProfileSaveErrorMessage(error);
+      Alert.alert('Could not save', message);
     } finally {
       setBusy(false);
     }
@@ -186,11 +221,31 @@ export function AccountProfileModal({
 
           <ScrollView style={styles.sheetBody} keyboardShouldPersistTaps="handled">
             <FloatingInput label="Name" value={name} onChange={setName} autoCapitalize="words" />
-            <View style={styles.readOnlyField}>
-              <Text style={styles.readOnlyLabel}>Email</Text>
-              <Text style={styles.readOnlyValue}>{email || 'Not available'}</Text>
-              <Text style={styles.readOnlyHint}>Email cannot be changed here</Text>
-            </View>
+            <FloatingInput
+              label="Email"
+              value={emailAddress}
+              onChange={setEmailAddress}
+              placeholder="Enter email address"
+              keyboardType="email-address"
+              autoComplete="email"
+              textContentType="emailAddress"
+            />
+            {emailChanged && (
+              <>
+                <FloatingInput
+                  label="Current password"
+                  value={currentPassword}
+                  onChange={setCurrentPassword}
+                  secureTextEntry
+                  placeholder="Required to change email"
+                  autoComplete="current-password"
+                  textContentType="password"
+                />
+                <Text style={styles.fieldHint}>
+                  Enter your current password to confirm this email change.
+                </Text>
+              </>
+            )}
             <FloatingInput
               label="Farm or operation name"
               value={farmName}
@@ -314,18 +369,6 @@ const styles = createStyles({
   chipActive: { backgroundColor: colors.accent, borderColor: colors.primary },
   chipText: { fontSize: 12, fontWeight: '600', color: colors.gray600 },
   chipTextActive: { color: colors.primary },
-  readOnlyField: {
-    marginBottom: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: colors.gray200,
-    backgroundColor: colors.gray100,
-  },
-  readOnlyLabel: { fontSize: 12, fontWeight: '600', color: colors.gray900, marginBottom: 6 },
-  readOnlyValue: { fontSize: 13, color: colors.gray700 },
-  readOnlyHint: { fontSize: 11, color: colors.gray400, marginTop: 6 },
   saveBtn: {
     paddingVertical: 16,
     borderRadius: 14,

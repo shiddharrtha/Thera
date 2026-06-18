@@ -112,6 +112,39 @@ export async function updateDisplayName(user: AuthUser, fullName: string) {
   return current;
 }
 
+/** Change the signed-in user's email (requires current password). */
+export async function updateAccountEmail(
+  user: AuthUser,
+  newEmail: string,
+  currentPassword: string,
+) {
+  const trimmedEmail = newEmail.trim();
+  const currentEmail = user.email;
+
+  if (!currentEmail) {
+    throw new Error('This account does not have an email address.');
+  }
+  if (!trimmedEmail) {
+    throw new Error('Please enter your email address.');
+  }
+  if (!currentPassword) {
+    throw new Error('Enter your current password to change your email.');
+  }
+  if (trimmedEmail.toLowerCase() === currentEmail.toLowerCase()) {
+    return firebaseAuth().currentUser ?? user;
+  }
+
+  const credential = firebaseAuth.EmailAuthProvider.credential(currentEmail, currentPassword);
+  await user.reauthenticateWithCredential(credential);
+  await user.updateEmail(trimmedEmail);
+  await user.reload();
+
+  const current = firebaseAuth().currentUser ?? user;
+  const fullName = current.displayName?.trim() ?? (await fetchProfileFullName(current.uid)) ?? '';
+  await upsertProfileWithRetry(current.uid, trimmedEmail, fullName);
+  return current;
+}
+
 /** Create or update the Supabase profile for the current Firebase user. */
 export async function ensureProfile(user: AuthUser, options?: { fullName?: string }) {
   const email = user.email;
@@ -181,6 +214,8 @@ export function getAuthErrorMessage(error: unknown): string {
       return 'Incorrect email or password.';
     case 'auth/email-already-in-use':
       return 'An account with this email already exists.';
+    case 'auth/requires-recent-login':
+      return 'For security, sign out and sign in again, then try changing your email.';
     case 'auth/weak-password':
       return 'Password must be at least 6 characters.';
     case 'auth/too-many-requests':

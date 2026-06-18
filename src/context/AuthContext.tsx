@@ -11,6 +11,7 @@ interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, fullName: string) => Promise<void>;
   updateDisplayName: (fullName: string) => Promise<void>;
+  updateAccountEmail: (email: string, currentPassword: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -110,6 +111,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const current = await authService.updateDisplayName(user, fullName);
         setUser(current);
         setDisplayName(fullName.trim());
+      },
+      updateAccountEmail: async (email, currentPassword) => {
+        if (!user) {
+          throw new Error('You must be signed in to update your profile.');
+        }
+        const current = await authService.updateAccountEmail(user, email, currentPassword);
+        setUser(current);
       },
       signOut: authService.signOut,
     }),
