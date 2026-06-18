@@ -523,26 +523,27 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   const completeFarmerOnboarding = useCallback(
     async (background: FarmerBackground) => {
+      const farm =
+        getSelectedFarm(dataRef.current.farms, dataRef.current.selectedFarmId) ??
+        dataRef.current.farms[0];
+      if (!farm) {
+        throw new Error('Farm profile is required before completing onboarding.');
+      }
+
+      // Update local state first so navigation works on the first Continue tap.
+      await mutateAppData((prev) => ({
+        ...prev,
+        farmerBackground: background,
+        onboardingComplete: true,
+      }));
+
+      if (!user) return;
+
       try {
-        const farm =
-          getSelectedFarm(dataRef.current.farms, dataRef.current.selectedFarmId) ??
-          dataRef.current.farms[0];
-        if (!farm) {
-          throw new Error('Farm profile is required before completing onboarding.');
-        }
-
-        if (user) {
-          await saveOnboardingFarm(user, farm, displayName, background);
-        }
-
-        await mutateAppData((prev) => ({
-          ...prev,
-          farmerBackground: background,
-          onboardingComplete: true,
-        }));
+        await saveOnboardingFarm(user, farm, displayName, background);
       } catch (error) {
-        if (error instanceof Error && error.message.includes('Farm profile is required')) {
-          throw error;
+        if (__DEV__) {
+          console.warn('[farm] complete farmer onboarding sync failed', error);
         }
         throw new Error(getProfileSaveErrorMessage(error));
       }

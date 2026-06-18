@@ -18,11 +18,12 @@ import {
   type FarmRoleOption,
 } from '../constants/farmerBackgroundOptions';
 import { validateFarmerBackgroundInput } from '../utils/farmerBackgroundForm';
+import { getProfileSaveErrorMessage } from '../services/profile';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
 export function FarmerBackgroundScreen({ onNavigate, onBack }: ScreenProps) {
-  const { completeFarmerOnboarding } = useAppData();
+  const { completeFarmerOnboarding, getDataSnapshot } = useAppData();
   const [yearsFarming, setYearsFarming] = useState('');
   const [birthday, setBirthday] = useState('');
   const [age, setAge] = useState('');
@@ -65,6 +66,16 @@ export function FarmerBackgroundScreen({ onNavigate, onBack }: ScreenProps) {
       await completeFarmerOnboarding(result.value);
       onNavigate('home', { replace: true });
     } catch (error) {
+      if (getDataSnapshot().onboardingComplete) {
+        const message = getProfileSaveErrorMessage(error);
+        Alert.alert(
+          'Saved on this device',
+          `${message}\n\nYour farmer profile is saved locally. You can continue to the app and sync later.`,
+          [{ text: 'Continue', onPress: () => onNavigate('home', { replace: true }) }],
+        );
+        return;
+      }
+
       const message = error instanceof Error ? error.message : 'Could not save your profile.';
       Alert.alert('Could not save', message);
     } finally {

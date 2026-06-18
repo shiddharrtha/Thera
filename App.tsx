@@ -147,7 +147,7 @@ function AppNavigator() {
       setHistory([]);
       setActiveTab('home');
       if (s === 'home') {
-        setScreen(getOnboardingScreen(appData));
+        setScreen(appData.onboardingComplete ? 'home' : getOnboardingScreen(appData));
       } else {
         setScreen(s);
       }
