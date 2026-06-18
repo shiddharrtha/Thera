@@ -156,6 +156,11 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
     farmName: string;
     region: string;
     yearsFarming: string;
+    birthday: string;
+    age: string;
+    fieldCount: string;
+    mainCrop: string;
+    pesticideBrand: string;
     farmRole: string;
     primaryGoals: string[];
   }) => {
@@ -166,6 +171,11 @@ export function SettingsScreen({ onNavigate, onBack }: ScreenProps) {
     });
     await updateFarmerBackground({
       yearsFarming: values.yearsFarming,
+      birthday: values.birthday,
+      age: values.age,
+      fieldCount: values.fieldCount,
+      mainCrop: values.mainCrop,
+      pesticideBrand: values.pesticideBrand,
       farmRole: values.farmRole,
       primaryGoals: values.primaryGoals,
     });

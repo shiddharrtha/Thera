@@ -12,18 +12,24 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ScreenProps } from '../types/navigation';
 import { useAppData } from '../context/AppDataContext';
-import { FloatingInput } from '../components/FloatingInput';
+import { FarmerBackgroundFields } from '../components/FarmerBackgroundFields';
+import type { CropOption } from '../constants/farmFormOptions';
 import {
-  FARM_ROLE_OPTIONS,
-  PRIMARY_GOAL_OPTIONS,
   type FarmRoleOption,
 } from '../constants/farmerBackgroundOptions';
+import { validateFarmerBackgroundInput } from '../utils/farmerBackgroundForm';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 
 export function FarmerBackgroundScreen({ onNavigate, onBack }: ScreenProps) {
   const { completeFarmerOnboarding } = useAppData();
   const [yearsFarming, setYearsFarming] = useState('');
+  const [birthday, setBirthday] = useState('');
+  const [age, setAge] = useState('');
+  const [fieldCount, setFieldCount] = useState('');
+  const [cropSelection, setCropSelection] = useState<CropOption>('Soybean');
+  const [otherCropType, setOtherCropType] = useState('');
+  const [pesticideBrand, setPesticideBrand] = useState('');
   const [farmRole, setFarmRole] = useState<FarmRoleOption>('Farm owner / operator');
   const [otherRole, setOtherRole] = useState('');
   const [primaryGoals, setPrimaryGoals] = useState<string[]>(['Weed scouting']);
@@ -36,34 +42,27 @@ export function FarmerBackgroundScreen({ onNavigate, onBack }: ScreenProps) {
   };
 
   const finishSetup = async () => {
-    const resolvedRole = farmRole === 'Other' ? otherRole.trim() : farmRole;
-    const years = Number(yearsFarming.trim());
+    const result = validateFarmerBackgroundInput({
+      yearsFarming,
+      birthday,
+      age,
+      fieldCount,
+      cropSelection,
+      otherCropType,
+      pesticideBrand,
+      farmRole,
+      otherRole,
+      primaryGoals,
+    });
 
-    if (!yearsFarming.trim() || !Number.isFinite(years) || years < 0) {
-      Alert.alert('Missing information', 'Please enter how many years you have been farming.');
-      return;
-    }
-    if (years > 100) {
-      Alert.alert('Invalid entry', 'Please enter a realistic number of years farming.');
-      return;
-    }
-
-    if (farmRole === 'Other' && !resolvedRole) {
-      Alert.alert('Missing information', 'Please describe your role on the farm.');
-      return;
-    }
-    if (primaryGoals.length === 0) {
-      Alert.alert('Missing information', 'Select at least one goal for using Thera.');
+    if (!result.ok) {
+      Alert.alert('Missing information', result.message);
       return;
     }
 
     setBusy(true);
     try {
-      await completeFarmerOnboarding({
-        yearsFarming: String(Math.round(years)),
-        farmRole: resolvedRole,
-        primaryGoals,
-      });
+      await completeFarmerOnboarding(result.value);
       onNavigate('home', { replace: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not save your profile.';
@@ -94,58 +93,28 @@ export function FarmerBackgroundScreen({ onNavigate, onBack }: ScreenProps) {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.fieldLabel}>How many years have you been farming?</Text>
-        <FloatingInput
-          label="Years farming"
-          value={yearsFarming}
-          onChange={setYearsFarming}
-          keyboardType="numeric"
-          placeholder="e.g. 12"
+        <FarmerBackgroundFields
+          yearsFarming={yearsFarming}
+          onYearsFarmingChange={setYearsFarming}
+          birthday={birthday}
+          onBirthdayChange={setBirthday}
+          age={age}
+          onAgeChange={setAge}
+          fieldCount={fieldCount}
+          onFieldCountChange={setFieldCount}
+          cropSelection={cropSelection}
+          onCropSelectionChange={setCropSelection}
+          otherCropType={otherCropType}
+          onOtherCropTypeChange={setOtherCropType}
+          pesticideBrand={pesticideBrand}
+          onPesticideBrandChange={setPesticideBrand}
+          farmRole={farmRole}
+          onFarmRoleChange={setFarmRole}
+          otherRole={otherRole}
+          onOtherRoleChange={setOtherRole}
+          primaryGoals={primaryGoals}
+          onToggleGoal={toggleGoal}
         />
-
-        <Text style={styles.fieldLabel}>What's your role?</Text>
-        <View style={styles.chipRow}>
-          {FARM_ROLE_OPTIONS.map((option) => (
-            <TouchableOpacity
-              key={option}
-              style={[styles.chip, farmRole === option && styles.chipActive]}
-              onPress={() => {
-                setFarmRole(option);
-                if (option !== 'Other') setOtherRole('');
-              }}
-            >
-              <Text style={[styles.chipText, farmRole === option && styles.chipTextActive]}>
-                {option}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        {farmRole === 'Other' && (
-          <FloatingInput
-            label="Describe your role"
-            value={otherRole}
-            onChange={setOtherRole}
-            placeholder="e.g. Custom applicator, crop scout"
-            autoCapitalize="words"
-          />
-        )}
-
-        <Text style={styles.fieldLabel}>What do you want Thera to help with?</Text>
-        <Text style={styles.fieldHint}>Select all that apply</Text>
-        <View style={styles.chipRow}>
-          {PRIMARY_GOAL_OPTIONS.map((goal) => {
-            const selected = primaryGoals.includes(goal);
-            return (
-              <TouchableOpacity
-                key={goal}
-                style={[styles.chip, selected && styles.chipActive]}
-                onPress={() => toggleGoal(goal)}
-              >
-                <Text style={[styles.chipText, selected && styles.chipTextActive]}>{goal}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
       </ScrollView>
 
       <View style={styles.footer}>
@@ -175,21 +144,7 @@ const styles = createStyles({
   title: { fontSize: 22, fontWeight: '900', color: colors.gray900 },
   subtitle: { fontSize: 13, color: colors.gray500, lineHeight: 18 },
   scroll: { flex: 1 },
-  scrollContent: { padding: 20, gap: 14, paddingBottom: 32 },
-  fieldLabel: { fontSize: 12, fontWeight: '600', color: colors.gray700, marginTop: 4 },
-  fieldHint: { fontSize: 11, color: colors.gray400, marginTop: -6 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  chipActive: { backgroundColor: colors.accent, borderColor: colors.primary },
-  chipText: { fontSize: 12, fontWeight: '600', color: colors.gray600 },
-  chipTextActive: { color: colors.primary },
+  scrollContent: { padding: 20, paddingBottom: 32 },
   footer: { padding: 20, gap: 10, backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.border },
   nextWrap: { borderRadius: 14, overflow: 'hidden' },
   nextBtn: { paddingVertical: 16, alignItems: 'center' },

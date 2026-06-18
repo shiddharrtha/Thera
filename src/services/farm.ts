@@ -1,4 +1,5 @@
 import type { AuthUser } from './auth';
+import { farmerBackgroundToRow } from './profile';
 import { firebaseAuth } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
 import type { Farm, FarmProfile, Units, FarmerBackground } from '../types/models';
@@ -189,9 +190,7 @@ export async function saveOnboardingFarm(
         approximate_acres: farm.approximateAcres,
         selected_farm_id: farm.id,
         onboarding_complete: true,
-        years_farming: background?.yearsFarming ?? null,
-        farm_role: background?.farmRole ?? null,
-        primary_goals: background?.primaryGoals ?? null,
+        ...(background ? farmerBackgroundToRow(background) : {}),
       },
       { onConflict: 'id' },
     );

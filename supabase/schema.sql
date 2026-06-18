@@ -12,6 +12,11 @@ create table if not exists public.profiles (
   years_farming text,
   farm_role text,
   primary_goals text[],
+  birthday date,
+  age integer,
+  field_count integer,
+  main_crop text,
+  pesticide_brand text,
   onboarding_complete boolean not null default false,
   created_at timestamptz not null default now()
 );

@@ -3,6 +3,22 @@ import { firebaseAuth } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
 import type { FarmProfile, Units, FarmerBackground } from '../types/models';
 
+export function farmerBackgroundToRow(background: FarmerBackground) {
+  const age = Number(background.age);
+  const fieldCount = Number(background.fieldCount);
+
+  return {
+    years_farming: background.yearsFarming,
+    farm_role: background.farmRole,
+    primary_goals: background.primaryGoals,
+    birthday: background.birthday || null,
+    age: Number.isFinite(age) ? Math.round(age) : null,
+    field_count: Number.isFinite(fieldCount) ? Math.round(fieldCount) : null,
+    main_crop: background.mainCrop || null,
+    pesticide_brand: background.pesticideBrand || null,
+  };
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -43,7 +59,7 @@ export function getProfileSaveErrorMessage(error: unknown): string {
   if (
     code === 'PGRST204' ||
     code === '42703' ||
-    /farm_name|primary_region|default_crop|preferred_units|approximate_acres|onboarding_complete|years_farming|farm_role|primary_goals/i.test(
+    /farm_name|primary_region|default_crop|preferred_units|approximate_acres|onboarding_complete|years_farming|farm_role|primary_goals|birthday|field_count|main_crop|pesticide_brand/i.test(
       message,
     )
   ) {
@@ -78,9 +94,7 @@ export async function saveFarmerBackground(user: AuthUser, background: FarmerBac
         {
           id: user.uid,
           email,
-          years_farming: background.yearsFarming,
-          farm_role: background.farmRole,
-          primary_goals: background.primaryGoals,
+          ...farmerBackgroundToRow(background),
         },
         { onConflict: 'id' },
       );
@@ -102,7 +116,9 @@ export async function saveFarmerBackground(user: AuthUser, background: FarmerBac
 export async function fetchFarmerBackground(userId: string): Promise<FarmerBackground | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('years_farming, farm_role, primary_goals')
+    .select(
+      'years_farming, farm_role, primary_goals, birthday, age, field_count, main_crop, pesticide_brand',
+    )
     .eq('id', userId)
     .maybeSingle();
 
@@ -112,7 +128,7 @@ export async function fetchFarmerBackground(userId: string): Promise<FarmerBackg
     if (
       code === 'PGRST204' ||
       code === '42703' ||
-      /years_farming|farm_role|primary_goals/i.test(message)
+      /years_farming|farm_role|primary_goals|birthday|age|field_count|main_crop|pesticide_brand/i.test(message)
     ) {
       return null;
     }
@@ -126,6 +142,11 @@ export async function fetchFarmerBackground(userId: string): Promise<FarmerBackg
 
   return {
     yearsFarming: String(Math.round(years)),
+    birthday: data.birthday ? String(data.birthday).slice(0, 10) : '',
+    age: data.age != null ? String(data.age) : '',
+    fieldCount: data.field_count != null ? String(data.field_count) : '',
+    mainCrop: data.main_crop?.trim() ?? '',
+    pesticideBrand: data.pesticide_brand?.trim() ?? '',
     farmRole: data.farm_role?.trim() || '',
     primaryGoals: Array.isArray(data.primary_goals) ? data.primary_goals : [],
   };

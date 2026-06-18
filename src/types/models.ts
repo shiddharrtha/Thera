@@ -17,6 +17,13 @@ export interface FarmProfile {
 export interface FarmerBackground {
   /** Whole number of years the farmer has been farming. */
   yearsFarming: string;
+  /** ISO date YYYY-MM-DD */
+  birthday: string;
+  age: string;
+  fieldCount: string;
+  mainCrop: string;
+  /** Brand name of the pesticide they typically use. */
+  pesticideBrand: string;
   farmRole: string;
   primaryGoals: string[];
 }

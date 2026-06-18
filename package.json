@@ -52,6 +52,8 @@
     "email:setup": "node scripts/setup-resend-email.mjs",
     "db:migrate-farm-profile": "node scripts/apply-farm-profile-migration.mjs",
     "db:migrate-farmer-background": "node scripts/apply-farmer-background-migration.mjs",
+    "db:migrate-farmer-background-details": "node scripts/apply-farmer-background-details-migration.mjs",
+    "db:migrate-pesticide-brand": "node scripts/apply-pesticide-brand-migration.mjs",
     "db:migrate-farms": "node scripts/apply-farms-migration.mjs",
     "db:migrate-fields-scans": "node scripts/apply-fields-scans-migration.mjs",
     "db:migrate-scan-video": "node scripts/apply-scan-video-migration.mjs",

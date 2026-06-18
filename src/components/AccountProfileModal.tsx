@@ -14,15 +14,15 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { FloatingInput } from './FloatingInput';
+import { FarmerBackgroundFields } from './FarmerBackgroundFields';
 import {
   REGION_OPTIONS,
   resolveChipSelection,
   resolveChipValue,
+  type CropOption,
   type RegionOption,
 } from '../constants/farmFormOptions';
 import {
-  FARM_ROLE_OPTIONS,
-  PRIMARY_GOAL_OPTIONS,
   resolveFarmRoleSelection,
   type FarmRoleOption,
 } from '../constants/farmerBackgroundOptions';
@@ -30,12 +30,18 @@ import { getProfileSaveErrorMessage } from '../services/profile';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
 import type { FarmProfile, FarmerBackground } from '../types/models';
+import { resolveMainCropSelection, validateFarmerBackgroundInput } from '../utils/farmerBackgroundForm';
 
 export interface AccountProfileFormValues {
   fullName: string;
   farmName: string;
   region: string;
   yearsFarming: string;
+  birthday: string;
+  age: string;
+  fieldCount: string;
+  mainCrop: string;
+  pesticideBrand: string;
   farmRole: string;
   primaryGoals: string[];
 }
@@ -64,6 +70,12 @@ export function AccountProfileModal({
   const [regionSelection, setRegionSelection] = useState<RegionOption>('Iowa');
   const [otherRegion, setOtherRegion] = useState('');
   const [yearsFarming, setYearsFarming] = useState('');
+  const [birthday, setBirthday] = useState('');
+  const [age, setAge] = useState('');
+  const [fieldCount, setFieldCount] = useState('');
+  const [cropSelection, setCropSelection] = useState<CropOption>('Soybean');
+  const [otherCropType, setOtherCropType] = useState('');
+  const [pesticideBrand, setPesticideBrand] = useState('');
   const [farmRole, setFarmRole] = useState<FarmRoleOption>('Farm owner / operator');
   const [otherRole, setOtherRole] = useState('');
   const [primaryGoals, setPrimaryGoals] = useState<string[]>([]);
@@ -86,6 +98,14 @@ export function AccountProfileModal({
     setOtherRegion(region.other);
 
     setYearsFarming(farmerBackground?.yearsFarming ?? '');
+    setBirthday(farmerBackground?.birthday ?? '');
+    setAge(farmerBackground?.age ?? '');
+    setFieldCount(farmerBackground?.fieldCount ?? '');
+
+    const crop = resolveMainCropSelection(farmerBackground?.mainCrop);
+    setCropSelection(crop.selection);
+    setOtherCropType(crop.other);
+    setPesticideBrand(farmerBackground?.pesticideBrand ?? '');
 
     const role = resolveFarmRoleSelection(farmerBackground?.farmRole);
     setFarmRole(role.selection);
@@ -98,8 +118,6 @@ export function AccountProfileModal({
     const trimmedName = name.trim();
     const trimmedFarmName = farmName.trim();
     const region = resolveChipValue(regionSelection, otherRegion);
-    const resolvedRole = farmRole === 'Other' ? otherRole.trim() : farmRole;
-    const years = Number(yearsFarming.trim());
 
     if (!trimmedName) {
       Alert.alert('Missing information', 'Please enter your name.');
@@ -113,20 +131,22 @@ export function AccountProfileModal({
       Alert.alert('Missing information', 'Please enter your region.');
       return;
     }
-    if (!yearsFarming.trim() || !Number.isFinite(years) || years < 0) {
-      Alert.alert('Missing information', 'Please enter how many years you have been farming.');
-      return;
-    }
-    if (years > 100) {
-      Alert.alert('Invalid entry', 'Please enter a realistic number of years farming.');
-      return;
-    }
-    if (farmRole === 'Other' && !resolvedRole) {
-      Alert.alert('Missing information', 'Please describe your role on the farm.');
-      return;
-    }
-    if (primaryGoals.length === 0) {
-      Alert.alert('Missing information', 'Select at least one goal for using Thera.');
+
+    const farmerResult = validateFarmerBackgroundInput({
+      yearsFarming,
+      birthday,
+      age,
+      fieldCount,
+      cropSelection,
+      otherCropType,
+      pesticideBrand,
+      farmRole,
+      otherRole,
+      primaryGoals,
+    });
+
+    if (!farmerResult.ok) {
+      Alert.alert('Missing information', farmerResult.message);
       return;
     }
 
@@ -136,9 +156,7 @@ export function AccountProfileModal({
         fullName: trimmedName,
         farmName: trimmedFarmName,
         region,
-        yearsFarming: String(Math.round(years)),
-        farmRole: resolvedRole,
-        primaryGoals,
+        ...farmerResult.value,
       });
       onClose();
     } catch (error) {
@@ -208,58 +226,28 @@ export function AccountProfileModal({
 
             <Text style={styles.sectionLabel}>Farmer background</Text>
 
-            <Text style={styles.fieldLabel}>How many years have you been farming?</Text>
-            <FloatingInput
-              label="Years farming"
-              value={yearsFarming}
-              onChange={setYearsFarming}
-              keyboardType="numeric"
-              placeholder="e.g. 12"
+            <FarmerBackgroundFields
+              yearsFarming={yearsFarming}
+              onYearsFarmingChange={setYearsFarming}
+              birthday={birthday}
+              onBirthdayChange={setBirthday}
+              age={age}
+              onAgeChange={setAge}
+              fieldCount={fieldCount}
+              onFieldCountChange={setFieldCount}
+              cropSelection={cropSelection}
+              onCropSelectionChange={setCropSelection}
+              otherCropType={otherCropType}
+              onOtherCropTypeChange={setOtherCropType}
+              pesticideBrand={pesticideBrand}
+              onPesticideBrandChange={setPesticideBrand}
+              farmRole={farmRole}
+              onFarmRoleChange={setFarmRole}
+              otherRole={otherRole}
+              onOtherRoleChange={setOtherRole}
+              primaryGoals={primaryGoals}
+              onToggleGoal={toggleGoal}
             />
-
-            <Text style={styles.fieldLabel}>What's your role?</Text>
-            <View style={styles.chipRow}>
-              {FARM_ROLE_OPTIONS.map((option) => (
-                <TouchableOpacity
-                  key={option}
-                  style={[styles.chip, farmRole === option && styles.chipActive]}
-                  onPress={() => {
-                    setFarmRole(option);
-                    if (option !== 'Other') setOtherRole('');
-                  }}
-                >
-                  <Text style={[styles.chipText, farmRole === option && styles.chipTextActive]}>
-                    {option}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            {farmRole === 'Other' && (
-              <FloatingInput
-                label="Describe your role"
-                value={otherRole}
-                onChange={setOtherRole}
-                placeholder="e.g. Custom applicator, crop scout"
-                autoCapitalize="words"
-              />
-            )}
-
-            <Text style={styles.fieldLabel}>What do you want Thera to help with?</Text>
-            <Text style={styles.fieldHint}>Select all that apply</Text>
-            <View style={styles.chipRow}>
-              {PRIMARY_GOAL_OPTIONS.map((goal) => {
-                const selected = primaryGoals.includes(goal);
-                return (
-                  <TouchableOpacity
-                    key={goal}
-                    style={[styles.chip, selected && styles.chipActive]}
-                    onPress={() => toggleGoal(goal)}
-                  >
-                    <Text style={[styles.chipText, selected && styles.chipTextActive]}>{goal}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
           </ScrollView>
 
           <TouchableOpacity onPress={() => void handleSave()} disabled={busy}>
@@ -304,7 +292,7 @@ const styles = createStyles({
     borderRadius: 12,
     backgroundColor: colors.background,
   },
-  sheetBody: { maxHeight: 520, marginBottom: 16 },
+  sheetBody: { maxHeight: 580, marginBottom: 16 },
   sectionLabel: {
     fontSize: 13,
     fontWeight: '800',
