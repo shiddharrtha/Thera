@@ -742,7 +742,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           isFirstScan,
           videoUri: capture?.videoUri,
           videoDurationSeconds: capture?.durationSeconds,
-          videoExtension: capture?.videoExtension,
+          videoExtension: capture?.videoExtension ?? 'mp4',
           gpsTrack: capture?.gpsTrack,
         };
         scanRef.value = scan;

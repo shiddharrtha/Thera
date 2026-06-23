@@ -33,7 +33,13 @@ export async function appendVideoForAnalysisUpload(
 ): Promise<void> {
   if (Platform.OS === 'web') {
     const blob = await readVideoBlob(localUri);
-    formData.append(fieldName, blob, fileName);
+    const mime =
+      fileName.endsWith('.webm') ? 'video/webm'
+      : fileName.endsWith('.mov') ? 'video/quicktime'
+      : blob.type && blob.type.startsWith('video/') ? blob.type
+      : 'video/mp4';
+    const uploadBlob = blob.type ? blob : new Blob([blob], { type: mime });
+    formData.append(fieldName, uploadBlob, fileName);
     return;
   }
 
@@ -42,8 +48,10 @@ export async function appendVideoForAnalysisUpload(
     throw new Error('Scan video file was not found on this device.');
   }
 
-  const mime = fileName.endsWith('.webm') ? 'video/webm' : 'video/mp4';
-  // Standard RN fetch multipart — works with global fetch to Railway (expo/fetch + File does not).
+  const mime =
+    fileName.endsWith('.webm') ? 'video/webm'
+    : fileName.endsWith('.mov') ? 'video/quicktime'
+    : 'video/mp4';
   formData.append(
     fieldName,
     {

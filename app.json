@@ -18,6 +18,7 @@
         "NSCameraUsageDescription": "Thera uses the camera to record field scans while you walk crop rows.",
         "NSMicrophoneUsageDescription": "Thera records audio with field scan videos.",
         "NSLocationWhenInUseUsageDescription": "Thera tracks your location during scans to map weeds and crop stress to your field.",
+        "NSPhotoLibraryUsageDescription": "Thera needs access to your photo library to import field scan videos.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
@@ -30,7 +31,9 @@
         "CAMERA",
         "RECORD_AUDIO",
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "ACCESS_COARSE_LOCATION",
+        "READ_MEDIA_VIDEO",
+        "READ_EXTERNAL_STORAGE"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -92,6 +95,13 @@
           "color": "#1B6B38",
           "defaultChannel": "scan-reports",
           "enableBackgroundRemoteNotifications": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Thera needs access to your photos to import field scan videos.",
+          "cameraPermission": "Thera uses the camera to record field scan videos."
         }
       ]
     ]

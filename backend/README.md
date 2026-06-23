@@ -155,3 +155,4 @@ Class names containing `weed`, `stress`, `disease`, etc. are mapped automaticall
 - First run downloads YOLO base weights if ultralytics is installed and custom weights are configured.
 - Videos are deleted from temp storage immediately after analysis.
 - The service role key is required to read private videos from the `scan-videos` bucket.
+- Uploaded and recorded scans are transcoded to **H.264 MP4** with `ffmpeg` before analysis and cloud backup (install `ffmpeg` on the server; included in `backend/Dockerfile`).

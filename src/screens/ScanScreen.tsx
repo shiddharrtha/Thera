@@ -9,17 +9,34 @@ import {
   Platform,
   useWindowDimensions,
 } from 'react-native';
-import { CameraView } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ScreenProps } from '../types/navigation';
 import { useAppData } from '../context/AppDataContext';
 import { useFieldScanner } from '../hooks/useFieldScanner';
+import { useScanVideoImport } from '../hooks/useScanVideoImport';
 import { WebScanCamera } from '../components/WebScanCamera';
+import { WebVideoFileInput } from '../components/WebVideoFileInput';
 import { EmptyState } from '../components/EmptyState';
 import { colors } from '../theme/colors';
 import { createStyles } from '../theme/createStyles';
+
+const CameraView = Platform.OS !== 'web' ? require('expo-camera').CameraView : null;
+
+const WEB_SCAN_TIPS = [
+  'Upload a field walk video from your computer or phone',
+  'Or record live with your webcam in the browser',
+  'Walk slowly between rows with the camera 2–3 feet above the crop',
+  'Allow location in your browser for GPS mapping (optional)',
+];
+
+const NATIVE_SCAN_TIPS = [
+  'Hold phone 2–3 feet above the crop',
+  'Walk slowly between rows',
+  'Keep crop rows aligned in frame',
+  'Allow location access for GPS tracking',
+];
 
 export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -30,11 +47,22 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
   const [activeFieldId, setActiveFieldId] = useState<string | null>(
     selectedFieldId ?? (fields.length === 1 ? fields[0]?.id ?? null : null),
   );
-  const [confirmed, setConfirmed] = useState(fields.length === 1);
+  const [confirmed, setConfirmed] = useState(fields.length === 1 && Platform.OS !== 'web');
   const [showTutorial, setShowTutorial] = useState(!hasCompletedScans);
   const [openingCamera, setOpeningCamera] = useState(false);
   const [savingScan, setSavingScan] = useState(false);
   const [cameraMountError, setCameraMountError] = useState<string | null>(null);
+
+  const videoImport = useScanVideoImport();
+  const {
+    busy: importingVideo,
+    error: importError,
+    setError: setImportError,
+    importFromLibrary,
+    fileInputRef,
+    onFileSelected,
+    importFromCamera,
+  } = videoImport;
 
   const {
     isWeb,
@@ -63,8 +91,9 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
 
   const activeField = activeFieldId ? fields.find((f) => f.id === activeFieldId) : undefined;
 
-  // Single-field flow skips "Open Camera" — prompt for permissions as soon as scan opens.
+  // Native single-field flow pre-requests permissions; web shows upload/record choices first.
   useEffect(() => {
+    if (Platform.OS === 'web') return;
     if (!confirmed || permissionsLoading || permissionStatus.canScan) return;
     void requestPermissions();
   }, [confirmed, permissionsLoading, permissionStatus.canScan, requestPermissions]);
@@ -94,6 +123,34 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
       setSavingScan(false);
     }
   };
+
+  const handleImportedVideo = async (capture: Awaited<ReturnType<typeof importFromLibrary>>) => {
+    if (!activeFieldId || !capture) return;
+
+    setSavingScan(true);
+    try {
+      await startScan(activeFieldId, capture);
+      setSelectedFieldId(activeFieldId);
+      onNavigate('processing');
+    } finally {
+      setSavingScan(false);
+    }
+  };
+
+  const handleImportFromLibrary = async () => {
+    setImportError(null);
+    const capture = await importFromLibrary();
+    await handleImportedVideo(capture);
+  };
+
+  const handleImportFromCamera = async () => {
+    if (!importFromCamera) return;
+    setImportError(null);
+    const capture = await importFromCamera();
+    await handleImportedVideo(capture);
+  };
+
+  const scanTips = isWeb ? WEB_SCAN_TIPS : NATIVE_SCAN_TIPS;
 
   if (fields.length === 0) {
     return (
@@ -146,6 +203,9 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
   if (!confirmed && activeField) {
     return (
       <View style={styles.selectorContainer}>
+        {isWeb && fileInputRef && onFileSelected && (
+          <WebVideoFileInput inputRef={fileInputRef} onFileSelected={onFileSelected} />
+        )}
         <View style={styles.selectorHeader}>
           <TouchableOpacity
             style={styles.backBtnDark}
@@ -153,20 +213,15 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
           >
             <Ionicons name="chevron-back" size={18} color={colors.gray700} />
           </TouchableOpacity>
-          <Text style={styles.selectorTitle}>Confirm Field</Text>
+          <Text style={styles.selectorTitle}>{isWeb ? 'Add Field Video' : 'Confirm Field'}</Text>
         </View>
         <View style={styles.confirmBody}>
           <Text style={styles.confirmName}>{activeField.name}</Text>
           <Text style={styles.confirmMeta}>{activeField.cropType} · {activeField.acreage} acres</Text>
           {showTutorial && (
             <View style={styles.tutorialCard}>
-              <Text style={styles.tutorialTitle}>First scan tips</Text>
-              {[
-                'Hold phone 2–3 feet above the crop',
-                'Walk slowly between rows',
-                'Keep crop rows aligned in frame',
-                'Allow location access for GPS tracking',
-              ].map((tip) => (
+              <Text style={styles.tutorialTitle}>{isWeb ? 'How scanning works' : 'First scan tips'}</Text>
+              {scanTips.map((tip) => (
                 <View key={tip} style={styles.tipRow}>
                   <View style={styles.tipDot} />
                   <Text style={styles.tipText}>{tip}</Text>
@@ -175,18 +230,91 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
             </View>
           )}
           {scannerError && <Text style={styles.errorText}>{scannerError}</Text>}
-          <TouchableOpacity onPress={handleOpenCamera} disabled={openingCamera}>
-            <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.confirmBtn}>
-              {openingCamera ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <>
-                  <Ionicons name="camera" size={18} color={colors.white} />
-                  <Text style={styles.confirmBtnText}>Open Camera</Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
+          {importError && <Text style={styles.errorText}>{importError}</Text>}
+
+          {isWeb ? (
+            <>
+              <TouchableOpacity
+                onPress={() => void handleImportFromLibrary()}
+                disabled={openingCamera || importingVideo || savingScan}
+              >
+                <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.confirmBtn}>
+                  {importingVideo || savingScan ? (
+                    <ActivityIndicator color={colors.white} />
+                  ) : (
+                    <>
+                      <Ionicons name="cloud-upload-outline" size={18} color={colors.white} />
+                      <Text style={styles.confirmBtnText}>Upload Video File</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <Text style={styles.importDividerText}>or record in your browser</Text>
+
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                onPress={handleOpenCamera}
+                disabled={openingCamera || importingVideo || savingScan}
+              >
+                {openingCamera ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <>
+                    <Ionicons name="videocam-outline" size={18} color={colors.primary} />
+                    <Text style={styles.secondaryBtnText}>Record with Webcam</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity onPress={handleOpenCamera} disabled={openingCamera || importingVideo || savingScan}>
+                <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.confirmBtn}>
+                  {openingCamera ? (
+                    <ActivityIndicator color={colors.white} />
+                  ) : (
+                    <>
+                      <Ionicons name="camera" size={18} color={colors.white} />
+                      <Text style={styles.confirmBtnText}>Scan with Live Camera</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <Text style={styles.importDividerText}>or import an existing video</Text>
+
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                onPress={() => void handleImportFromLibrary()}
+                disabled={openingCamera || importingVideo || savingScan}
+              >
+                {importingVideo || savingScan ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <>
+                    <Ionicons name="images-outline" size={18} color={colors.primary} />
+                    <Text style={styles.secondaryBtnText}>Choose from Photos</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                onPress={() => void handleImportFromCamera()}
+                disabled={openingCamera || importingVideo || savingScan}
+              >
+                <Ionicons name="videocam-outline" size={18} color={colors.primary} />
+                <Text style={styles.secondaryBtnText}>Record with Camera App</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          <Text style={styles.importHint}>
+            {isWeb
+              ? 'Videos are converted to MP4 on our servers and saved to your account for download and analysis.'
+              : 'Imported and recorded scans are saved as MP4 in your account and can be downloaded from cloud storage.'}
+          </Text>
         </View>
       </View>
     );
@@ -196,9 +324,13 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
     return (
       <View style={styles.selectorContainer}>
         <View style={styles.confirmBody}>
-          <Text style={styles.confirmName}>Permissions needed</Text>
+          <Text style={styles.confirmName}>
+            {isWeb ? 'Allow camera access' : 'Permissions needed'}
+          </Text>
           <Text style={styles.confirmMeta}>
-            Thera needs camera access to record scans. Location is recommended for GPS field mapping.
+            {isWeb
+              ? 'Your browser needs camera permission to record a live field scan. Click Allow when prompted, or go back to upload a video file instead.'
+              : 'Thera needs camera access to record scans. Location is recommended for GPS field mapping.'}
           </Text>
 
           <View style={styles.permissionList}>
@@ -304,21 +436,23 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
         {isWeb ? (
           <WebScanCamera videoRef={videoRef} style={StyleSheet.absoluteFill} />
         ) : (
-          <CameraView
-            ref={cameraRef}
-            style={StyleSheet.absoluteFill}
-            facing="back"
-            mode="video"
-            mute
-            videoQuality="720p"
-            active
-            responsiveOrientationWhenOrientationLocked
-            onCameraReady={markCameraReady}
-            onMountError={({ message }) => {
-              setCameraMountError(message);
-              if (__DEV__) console.warn('[scan] camera mount error', message);
-            }}
-          />
+          CameraView && (
+            <CameraView
+              ref={cameraRef}
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              mode="video"
+              mute
+              videoQuality="720p"
+              active
+              responsiveOrientationWhenOrientationLocked
+              onCameraReady={markCameraReady}
+              onMountError={({ message }: { message: string }) => {
+                setCameraMountError(message);
+                if (__DEV__) console.warn('[scan] camera mount error', message);
+              }}
+            />
+          )
         )}
       </View>
 
@@ -435,7 +569,9 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
         {scannerError && <Text style={styles.errorBanner}>{scannerError}</Text>}
         {!permissionStatus.location && !isRecording ? (
           <TouchableOpacity onPress={() => void requestLocationOnly()} style={styles.locationPrompt}>
-            <Text style={styles.locationPromptText}>Tap to enable GPS for this scan</Text>
+            <Text style={styles.locationPromptText}>
+              {isWeb ? 'Tap to allow browser location for this scan' : 'Tap to enable GPS for this scan'}
+            </Text>
           </TouchableOpacity>
         ) : null}
         {cameraMountError && !scannerError && (
@@ -454,7 +590,9 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
                     : seconds < 3
                       ? 'Recording… keep walking for a few seconds'
                       : 'Keep going · Walk slowly'
-                  : 'Tap the button to start scanning'}
+                  : isWeb
+                    ? 'Tap to start recording, or use the upload button to choose a file'
+                    : 'Tap the button to start scanning, or go back to import a video'}
         </Text>
         <View style={styles.controlRow}>
           {isRecording && (
@@ -486,11 +624,18 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
               <Ionicons name={isRecording ? 'stop' : 'play'} size={28} color={colors.white} />
             )}
           </TouchableOpacity>
-          {!isRecording && (
-            <TouchableOpacity style={styles.sideBtn} disabled={savingScan}>
-              <Ionicons name="location" size={20} color={colors.white} />
-            </TouchableOpacity>
-          )}
+        {!isRecording && (
+          <TouchableOpacity
+            style={styles.sideBtn}
+            disabled={savingScan}
+            onPress={() => {
+              resetScanner();
+              setConfirmed(false);
+            }}
+          >
+            <Ionicons name={isWeb ? 'cloud-upload-outline' : 'location'} size={20} color={colors.white} />
+          </TouchableOpacity>
+        )}
         </View>
       </View>
     </View>
@@ -500,7 +645,7 @@ export function ScanScreen({ onNavigate, onBack }: ScreenProps) {
 const styles = createStyles({
   container: { flex: 1, backgroundColor: colors.scanDark },
   cameraLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     overflow: 'hidden',
     backgroundColor: colors.scanDark,
   },
@@ -551,6 +696,26 @@ const styles = createStyles({
     minHeight: 52,
   },
   confirmBtnText: { color: colors.white, fontWeight: '700', fontSize: 15 },
+  importDividerText: {
+    textAlign: 'center',
+    fontSize: 12,
+    color: colors.gray400,
+    marginTop: 4,
+  },
+  secondaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    minHeight: 52,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: colors.white,
+  },
+  secondaryBtnText: { color: colors.primary, fontWeight: '700', fontSize: 14 },
+  importHint: { fontSize: 11, color: colors.gray400, lineHeight: 16, textAlign: 'center' },
   errorText: { color: colors.destructive, fontSize: 13 },
   permissionList: { gap: 8, marginTop: 4 },
   permissionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

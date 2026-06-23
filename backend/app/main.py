@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.analysis.pipeline import analyze_video_file
+from app.analysis.video_transcode import ensure_mp4_video
 from app.auth import verify_request_auth
 from app.config import settings
 from app.models import AnalyzeScanRequest, AnalyzeScanResponse
@@ -60,19 +61,26 @@ async def health() -> dict[str, str]:
 
 async def _run_analysis(request: AnalyzeScanRequest, uploaded_path: Path | None) -> AnalyzeScanResponse:
     video_path: Path | None = uploaded_path
+    transcode_path: Path | None = None
     try:
         if video_path is None:
             video_path = await download_scan_video(
                 video_path=request.video_path,
                 local_video_url=request.local_video_url,
             )
-        return analyze_video_file(video_path, request)
+
+        mp4_path, was_transcoded = ensure_mp4_video(video_path)
+        if was_transcoded and mp4_path != video_path:
+            transcode_path = mp4_path
+
+        return analyze_video_file(mp4_path, request)
     finally:
-        if video_path and video_path.exists():
-            try:
-                os.unlink(video_path)
-            except OSError:
-                pass
+        for path in {video_path, transcode_path}:
+            if path and path.exists():
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
 
 
 @app.post("/v1/scans/analyze", response_model=AnalyzeScanResponse)
@@ -129,20 +137,33 @@ async def analyze_scan_upload(
     suffix = Path(video.filename or "scan.mp4").suffix or ".mp4"
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
     video_path: str | None = request.video_path
+    transcode_path: Path | None = None
+    temp_path: Path | None = None
+    mp4_path: Path | None = None
     try:
         content = await video.read()
         temp_file.write(content)
         temp_file.close()
         temp_path = Path(temp_file.name)
 
+        mp4_path, was_transcoded = ensure_mp4_video(temp_path)
+        if was_transcoded and mp4_path != temp_path:
+            transcode_path = mp4_path
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+        else:
+            mp4_path = temp_path
+
         if not video_path:
             try:
-                video_path = await upload_scan_video(request.user_id, request.scan_id, temp_path)
+                video_path = await upload_scan_video(request.user_id, request.scan_id, mp4_path)
                 logger.info("Backed up scan %s to %s", request.scan_id, video_path)
             except Exception as exc:
                 logger.warning("Cloud backup failed for scan %s: %s", request.scan_id, exc)
 
-        response = await _run_analysis(request, temp_path)
+        response = analyze_video_file(mp4_path, request)
         if video_path:
             return response.model_copy(update={"video_path": video_path})
         return response
@@ -155,3 +176,10 @@ async def analyze_scan_upload(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Scan analysis failed: {exc}",
         ) from exc
+    finally:
+        for path in {temp_path, transcode_path, mp4_path}:
+            if path and path.exists():
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass

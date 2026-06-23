@@ -1,6 +1,8 @@
 import { firebaseAuth } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
+import { Platform } from 'react-native';
 import { createAbortError } from '../utils/abortError';
+import { persistScanVideoAsMp4 } from '../utils/normalizeScanVideo';
 import { readVideoBlob } from '../utils/readVideoBlob';
 
 export const SCAN_VIDEOS_BUCKET = 'scan-videos';
@@ -163,10 +165,13 @@ export async function uploadScanVideoFile(
   assertNotAborted(signal);
   onProgress?.(5);
 
+  const uploadUri =
+    Platform.OS === 'web' ? localUri : (await persistScanVideoAsMp4(localUri)).videoUri;
+
   assertNotAborted(signal);
   onProgress?.(10);
   const blob = await withTimeout(
-    readVideoBlob(localUri),
+    readVideoBlob(uploadUri),
     UPLOAD_TIMEOUT_MS,
     'Reading scan video',
     signal,

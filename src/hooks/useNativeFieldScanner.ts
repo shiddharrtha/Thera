@@ -216,6 +216,8 @@ export function useNativeFieldScanner(): FieldScanner {
       recordedEndAtMs,
       recordedAt: toIsoTimestamp(recordedAtMs),
       recordedEndAt: toIsoTimestamp(recordedEndAtMs),
+      videoExtension: 'mp4',
+      videoMimeType: 'video/mp4',
     } satisfies ScanCapture;
   }, []);
 
